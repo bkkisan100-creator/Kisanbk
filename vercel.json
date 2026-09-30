@@ -1,10 +1,1 @@
-@'
-{
-  "crons": [
-    {
-      "path": "/api/cron/hourly-news",
-      "schedule": "0 * * * *"
-    }
-  ]
-}
-'@ | Set-Content vercel.json
+{}

@@ -28,8 +28,10 @@ type Panel =
   | "alerts"
   | "profile";
 
-const CHAT_STORAGE_KEY =
-  "aaja-ke-chha-ai-chat-history";
+const CHAT_STORAGE_KEY = "aaja-ke-chha-ai-chat-history";
+
+const BACKGROUND_MUSIC =
+  "https://ieuytrerprgrfqenxwsi.supabase.co/storage/v1/object/public/audio/background-music.wav";
 
 function makeId() {
   return `${Date.now()}-${Math.random()
@@ -50,65 +52,49 @@ function shortTitle(title: string) {
 }
 
 function formatTime(seconds: number) {
-  if (
-    !Number.isFinite(seconds) ||
-    seconds < 0
-  ) {
+  if (!Number.isFinite(seconds) || seconds < 0) {
     return "0:00";
   }
 
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
 
-  return `${mins}:${secs
-    .toString()
-    .padStart(2, "0")}`;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
-function formatPublishedTime(
-  value?: string
-) {
+function formatPublishedTime(value?: string) {
   if (!value) return "";
 
   try {
-    return new Date(value).toLocaleString(
-      "ne-NP",
-      {
-        hour: "2-digit",
-        minute: "2-digit",
-        day: "numeric",
-        month: "short",
-      }
-    );
+    return new Date(value).toLocaleString("ne-NP", {
+      hour: "2-digit",
+      minute: "2-digit",
+      day: "numeric",
+      month: "short",
+    });
   } catch {
     return "";
   }
 }
 
-function getBulletinTime(
-  value?: string
-) {
+function getBulletinTime(value?: string) {
   if (!value) return "";
 
   try {
-    return new Date(value).toLocaleString(
-      "ne-NP",
-      {
-        hour: "2-digit",
-        minute: "2-digit",
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      }
-    );
+    return new Date(value).toLocaleString("ne-NP", {
+      hour: "2-digit",
+      minute: "2-digit",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
   } catch {
     return "";
   }
 }
 
 export default function Home() {
-  const [showSplash, setShowSplash] =
-    useState(true);
+  const [showSplash, setShowSplash] = useState(true);
 
   const [bulletin, setBulletin] =
     useState<Bulletin | null>(null);
@@ -158,12 +144,6 @@ export default function Home() {
   const [audioDuration, setAudioDuration] =
     useState(0);
 
-  /*
-   * Currently selected audio.
-   *
-   * Latest bulletin and old bulletin
-   * both use the same player.
-   */
   const [selectedAudio, setSelectedAudio] =
     useState<Bulletin | null>(null);
 
@@ -182,10 +162,19 @@ export default function Home() {
   const audioRef =
     useRef<HTMLAudioElement | null>(null);
 
+  const musicRef =
+    useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    if (musicRef.current) {
+      musicRef.current.volume = 0.005; // Music volume sosaa-sosaa (0.5%)
+    }
+  }, []);
+
   /*
-   * ============================
+   * ==================================================
    * SPLASH
-   * ============================
+   * ==================================================
    */
 
   useEffect(() => {
@@ -197,9 +186,9 @@ export default function Home() {
   }, []);
 
   /*
-   * ============================
+   * ==================================================
    * INITIAL DATA
-   * ============================
+   * ==================================================
    */
 
   useEffect(() => {
@@ -208,12 +197,9 @@ export default function Home() {
   }, []);
 
   /*
-   * ============================
+   * ==================================================
    * AUTO REFRESH
-   * ============================
-   *
-   * Every 60 seconds check whether
-   * a new hourly bulletin arrived.
+   * ==================================================
    */
 
   useEffect(() => {
@@ -228,14 +214,12 @@ export default function Home() {
   }, [showSplash]);
 
   /*
-   * ============================
-   * LOAD LATEST
-   * ============================
+   * ==================================================
+   * LOAD LATEST BULLETIN
+   * ==================================================
    */
 
-  async function loadBulletin(
-    silent = false
-  ) {
+  async function loadBulletin(silent = false) {
     try {
       if (!silent) {
         setLoadingBulletin(true);
@@ -250,12 +234,8 @@ export default function Home() {
 
       const data = await response.json();
 
-      if (
-        data?.success &&
-        data?.bulletin
-      ) {
-        const latest =
-          data.bulletin as Bulletin;
+      if (data?.success && data?.bulletin) {
+        const latest = data.bulletin as Bulletin;
 
         setBulletin(latest);
 
@@ -263,56 +243,17 @@ export default function Home() {
           latest.like_count || 0
         );
 
-        /*
-         * If no audio is currently selected,
-         * use latest.
-         *
-         * If current selected audio is already
-         * the latest, update it too.
-         */
-        setSelectedAudio(
-          (previous) => {
-            if (!previous) {
-              return latest;
-            }
-
-            if (
-              previous.id === latest.id
-            ) {
-              return latest;
-            }
-
-            return previous;
+        setSelectedAudio((previous) => {
+          if (!previous) {
+            return latest;
           }
-        );
-      } else if (
-        data?.success &&
-        data?.id
-      ) {
-        const latest =
-          data as Bulletin;
 
-        setBulletin(latest);
-
-        setLikeCount(
-          latest.like_count || 0
-        );
-
-        setSelectedAudio(
-          (previous) => {
-            if (!previous) {
-              return latest;
-            }
-
-            if (
-              previous.id === latest.id
-            ) {
-              return latest;
-            }
-
-            return previous;
+          if (previous.id === latest.id) {
+            return latest;
           }
-        );
+
+          return previous;
+        });
       }
     } catch (error) {
       console.error(
@@ -327,14 +268,12 @@ export default function Home() {
   }
 
   /*
-   * ============================
+   * ==================================================
    * LOAD HISTORY
-   * ============================
+   * ==================================================
    */
 
-  async function loadHistory(
-    silent = false
-  ) {
+  async function loadHistory(silent = false) {
     try {
       if (!silent) {
         setLoadingHistory(true);
@@ -353,9 +292,7 @@ export default function Home() {
         data?.success &&
         Array.isArray(data?.bulletins)
       ) {
-        setHistory(
-          data.bulletins
-        );
+        setHistory(data.bulletins);
       }
     } catch (error) {
       console.error(
@@ -370,9 +307,72 @@ export default function Home() {
   }
 
   /*
-   * ============================
+   * ==================================================
+   * STOP EVERYTHING
+   * ==================================================
+   */
+
+  function stopAllAudio() {
+    const newsAudio = audioRef.current;
+    const musicAudio = musicRef.current;
+
+    if (newsAudio) {
+      newsAudio.pause();
+      newsAudio.currentTime = 0;
+    }
+
+    if (musicAudio) {
+      musicAudio.pause();
+      musicAudio.currentTime = 0;
+    }
+
+    setAudioPlaying(false);
+    setAudioCurrent(0);
+  }
+
+  /*
+   * ==================================================
+   * START BACKGROUND MUSIC
+   * ==================================================
+   */
+
+  async function startBackgroundMusic() {
+    const music = musicRef.current;
+
+    if (!music) return;
+
+    try {
+      music.volume = 0.005; // Music volume sosaa-sosaa (0.5%)
+
+      music.currentTime = 0;
+
+      await music.play();
+    } catch (error) {
+      console.warn(
+        "Background music could not start:",
+        error
+      );
+    }
+  }
+
+  /*
+   * ==================================================
+   * PAUSE BACKGROUND MUSIC
+   * ==================================================
+   */
+
+  function pauseBackgroundMusic() {
+    const music = musicRef.current;
+
+    if (!music) return;
+
+    music.pause();
+  }
+
+  /*
+   * ==================================================
    * PLAY BULLETIN
-   * ============================
+   * ==================================================
    */
 
   async function playBulletin(
@@ -382,24 +382,30 @@ export default function Home() {
       return;
     }
 
-    const audio =
-      audioRef.current;
+    const audio = audioRef.current;
 
     if (!audio) {
       return;
     }
 
-    /*
-     * Same audio clicked again
-     * => pause/play
-     */
     if (
       selectedAudio?.id === item.id
     ) {
       if (audio.paused) {
         try {
           await audio.play();
+
           setAudioPlaying(true);
+
+          const music =
+            musicRef.current;
+
+          if (music) {
+            try {
+              music.volume = 0.005;
+              await music.play();
+            } catch {}
+          }
         } catch (error) {
           console.error(
             "Audio play error:",
@@ -408,23 +414,22 @@ export default function Home() {
         }
       } else {
         audio.pause();
+
+        pauseBackgroundMusic();
+
         setAudioPlaying(false);
       }
 
       return;
     }
 
-    /*
-     * New audio selected
-     */
+    stopAllAudio();
+
     setSelectedAudio(item);
 
     setAudioCurrent(0);
     setAudioDuration(0);
 
-    /*
-     * Wait until React updates the audio src.
-     */
     setTimeout(async () => {
       const currentAudio =
         audioRef.current;
@@ -432,24 +437,59 @@ export default function Home() {
       if (!currentAudio) return;
 
       try {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+
         currentAudio.load();
+
+        await new Promise<void>(
+          (resolve) => {
+            const handler = () => {
+              currentAudio.removeEventListener(
+                "canplay",
+                handler
+              );
+
+              resolve();
+            };
+
+            currentAudio.addEventListener(
+              "canplay",
+              handler
+            );
+
+            setTimeout(() => {
+              currentAudio.removeEventListener(
+                "canplay",
+                handler
+              );
+
+              resolve();
+            }, 1000);
+          }
+        );
 
         await currentAudio.play();
 
         setAudioPlaying(true);
+
+        await startBackgroundMusic();
       } catch (error) {
         console.error(
           "Selected audio play error:",
           error
         );
+
+        setAudioPlaying(false);
+        pauseBackgroundMusic();
       }
-    }, 100);
+    }, 80);
   }
 
   /*
-   * ============================
+   * ==================================================
    * LATEST AUDIO
-   * ============================
+   * ==================================================
    */
 
   async function playLatest() {
@@ -457,40 +497,58 @@ export default function Home() {
       return;
     }
 
-    await playBulletin(
-      bulletin
-    );
+    await playBulletin(bulletin);
   }
 
   /*
-   * ============================
-   * AUDIO
-   * ============================
+   * ==================================================
+   * AUDIO TOGGLE
+   * ==================================================
    */
 
-  function toggleAudio() {
+  async function toggleAudio() {
     const audio =
       audioRef.current;
 
-    if (!audio) return;
+    if (!audio || !selectedAudio) {
+      return;
+    }
 
     if (audio.paused) {
-      audio
-        .play()
-        .then(() => {
-          setAudioPlaying(true);
-        })
-        .catch((error) => {
-          console.error(
-            "Audio play error:",
-            error
-          );
-        });
+      try {
+        await audio.play();
+
+        setAudioPlaying(true);
+
+        const music =
+          musicRef.current;
+
+        if (music) {
+          try {
+            music.volume = 0.005;
+            await music.play();
+          } catch {}
+        }
+      } catch (error) {
+        console.error(
+          "Audio play error:",
+          error
+        );
+      }
     } else {
       audio.pause();
+
+      pauseBackgroundMusic();
+
       setAudioPlaying(false);
     }
   }
+
+  /*
+   * ==================================================
+   * AUDIO TIME UPDATE
+   * ==================================================
+   */
 
   function handleAudioTimeUpdate() {
     const audio =
@@ -503,6 +561,12 @@ export default function Home() {
     );
   }
 
+  /*
+   * ==================================================
+   * AUDIO METADATA
+   * ==================================================
+   */
+
   function handleAudioLoadedMetadata() {
     const audio =
       audioRef.current;
@@ -514,10 +578,38 @@ export default function Home() {
     );
   }
 
+  /*
+   * ==================================================
+   * AUDIO ENDED
+   * ==================================================
+   */
+
   function handleAudioEnded() {
+    const audio =
+      audioRef.current;
+
+    const music =
+      musicRef.current;
+
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+
+    if (music) {
+      music.pause();
+      music.currentTime = 0;
+    }
+
     setAudioPlaying(false);
     setAudioCurrent(0);
   }
+
+  /*
+   * ==================================================
+   * AUDIO SEEK
+   * ==================================================
+   */
 
   function handleAudioSeek(
     event: React.ChangeEvent<HTMLInputElement>
@@ -534,9 +626,9 @@ export default function Home() {
   }
 
   /*
-   * ============================
+   * ==================================================
    * CHAT HISTORY
-   * ============================
+   * ==================================================
    */
 
   useEffect(() => {
@@ -582,9 +674,9 @@ export default function Home() {
   }, []);
 
   /*
-   * ============================
+   * ==================================================
    * SAVE CHAT
-   * ============================
+   * ==================================================
    */
 
   useEffect(() => {
@@ -593,9 +685,7 @@ export default function Home() {
     try {
       localStorage.setItem(
         CHAT_STORAGE_KEY,
-        JSON.stringify(
-          chatMessages
-        )
+        JSON.stringify(chatMessages)
       );
     } catch (error) {
       console.error(
@@ -606,23 +696,20 @@ export default function Home() {
   }, [chatMessages]);
 
   /*
-   * ============================
+   * ==================================================
    * CHAT SCROLL
-   * ============================
+   * ==================================================
    */
 
   useEffect(() => {
     if (panel !== "chat") return;
 
-    const timer =
-      setTimeout(() => {
-        chatEndRef.current?.scrollIntoView(
-          {
-            behavior: "smooth",
-            block: "end",
-          }
-        );
-      }, 50);
+    const timer = setTimeout(() => {
+      chatEndRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "end",
+      });
+    }, 50);
 
     return () => clearTimeout(timer);
   }, [
@@ -632,19 +719,18 @@ export default function Home() {
   ]);
 
   /*
-   * ============================
+   * ==================================================
    * NEW CHAT
-   * ============================
+   * ==================================================
    */
 
   function startNewChat() {
-    const firstMessage: ChatMessage =
-      {
-        id: makeId(),
-        role: "assistant",
-        text:
-          "नयाँ chat सुरु भयो 👋 अब के कुरा गरौँ?",
-      };
+    const firstMessage: ChatMessage = {
+      id: makeId(),
+      role: "assistant",
+      text:
+        "नयाँ chat सुरु भयो 👋 अब के कुरा गरौँ?",
+    };
 
     setChatMessages([
       firstMessage,
@@ -666,24 +752,20 @@ export default function Home() {
   }
 
   /*
-   * ============================
+   * ==================================================
    * SEND CHAT
-   * ============================
+   * ==================================================
    */
 
   async function sendChatMessage() {
     const message =
       chatInput.trim();
 
-    if (
-      !message ||
-      chatLoading
-    ) {
+    if (!message || chatLoading) {
       return;
     }
 
-    const userMessage:
-      ChatMessage = {
+    const userMessage: ChatMessage = {
       id: makeId(),
       role: "user",
       text: message,
@@ -770,18 +852,15 @@ export default function Home() {
         error
       );
 
-      const errorMessage:
-        ChatMessage = {
-        id: makeId(),
-        role: "assistant",
-        text:
-          "माफ गर्नुहोस्, अहिले AI सँग connection हुन सकेन। केही बेरपछि फेरि प्रयास गर्नुहोस्।",
-      };
-
       setChatMessages(
         (previous) => [
           ...previous,
-          errorMessage,
+          {
+            id: makeId(),
+            role: "assistant",
+            text:
+              "माफ गर्नुहोस्, अहिले AI सँग connection हुन सकेन। केही बेरपछि फेरि प्रयास गर्नुहोस्।",
+          },
         ]
       );
     } finally {
@@ -790,9 +869,9 @@ export default function Home() {
   }
 
   /*
-   * ============================
+   * ==================================================
    * CHAT KEYBOARD
-   * ============================
+   * ==================================================
    */
 
   function handleChatKeyDown(
@@ -808,16 +887,15 @@ export default function Home() {
   }
 
   /*
-   * ============================
+   * ==================================================
    * LIKE
-   * ============================
+   * ==================================================
    */
 
   async function toggleLike() {
     if (!bulletin) return;
 
-    const nextLiked =
-      !liked;
+    const nextLiked = !liked;
 
     setLiked(nextLiked);
 
@@ -857,9 +935,9 @@ export default function Home() {
   }
 
   /*
-   * ============================
+   * ==================================================
    * SHARE
-   * ============================
+   * ==================================================
    */
 
   async function shareNews() {
@@ -899,9 +977,9 @@ export default function Home() {
   }
 
   /*
-   * ============================
+   * ==================================================
    * COMMENTS
-   * ============================
+   * ==================================================
    */
 
   function addComment() {
@@ -921,9 +999,9 @@ export default function Home() {
   }
 
   /*
-   * ============================
+   * ==================================================
    * SEARCH
-   * ============================
+   * ==================================================
    */
 
   async function performSearch() {
@@ -968,9 +1046,9 @@ export default function Home() {
   }
 
   /*
-   * ============================
+   * ==================================================
    * SPLASH
-   * ============================
+   * ==================================================
    */
 
   if (showSplash) {
@@ -986,37 +1064,42 @@ export default function Home() {
   }
 
   /*
-   * ============================
+   * ==================================================
    * MAIN APP
-   * ============================
+   * ==================================================
    */
 
   return (
     <main className="app-shell">
 
-      {selectedAudio?.audio_url && (
-        <audio
-          ref={audioRef}
-          src={
-            selectedAudio.audio_url
-          }
-          preload="metadata"
-          onTimeUpdate={
-            handleAudioTimeUpdate
-          }
-          onLoadedMetadata={
-            handleAudioLoadedMetadata
-          }
-          onEnded={
-            handleAudioEnded
-          }
-        />
-      )}
+      {/* NEWS AUDIO */}
+      <audio
+        ref={audioRef}
+        src={
+          selectedAudio?.audio_url ||
+          ""
+        }
+        preload="metadata"
+        onTimeUpdate={
+          handleAudioTimeUpdate
+        }
+        onLoadedMetadata={
+          handleAudioLoadedMetadata
+        }
+        onEnded={
+          handleAudioEnded
+        }
+      />
 
-      {/* ==================================================
-          HOME
-      ================================================== */}
+      {/* BACKGROUND MUSIC */}
+      <audio
+        ref={musicRef}
+        src={BACKGROUND_MUSIC}
+        preload="auto"
+        loop
+      />
 
+      {/* HOME */}
       {panel === "home" && (
         <section className="home-screen">
 
@@ -1025,8 +1108,6 @@ export default function Home() {
             <div className="background-glow glow-two" />
             <div className="background-grid" />
           </div>
-
-          {/* HEADER */}
 
           <header className="top-header">
 
@@ -1061,39 +1142,65 @@ export default function Home() {
 
           </header>
 
-          {/* LIVE */}
-
           <div className="live-pill">
             <span className="live-dot" />
             LIVE NEWS
           </div>
 
-          {/* NEWS */}
+          <div className="news-photo-card">
+
+            <img
+              src="/news-photo.jpg"
+              alt="आज के छ? News"
+              className="news-photo"
+            />
+
+            <div className="news-photo-overlay">
+
+              <div className="photo-badge">
+                <span />
+                TODAY
+              </div>
+
+              <div className="photo-caption">
+                आजका मुख्य समाचार
+              </div>
+
+            </div>
+
+          </div>
 
           <div className="news-content">
 
             {loadingBulletin ? (
               <div className="loading-news">
+
                 <div className="loading-circle" />
+
                 <p>
                   समाचार तयार हुँदैछ...
                 </p>
+
               </div>
             ) : bulletin ? (
               <>
 
                 <div className="news-meta">
+
                   <span>
                     आज के छ?
                   </span>
 
-                  <span>•</span>
+                  <span>
+                    •
+                  </span>
 
                   <span>
                     {formatPublishedTime(
                       bulletin.published_at
                     )}
                   </span>
+
                 </div>
 
                 <h1 className="news-headline">
@@ -1113,24 +1220,29 @@ export default function Home() {
               </>
             ) : (
               <div className="loading-news">
+
                 <p>
                   अहिले bulletin उपलब्ध छैन।
                 </p>
+
               </div>
             )}
 
           </div>
 
-          {/* RIGHT ACTIONS */}
-
           <aside className="right-actions">
 
             <button
               className={`action-button ${
-                liked ? "active" : ""
+                liked
+                  ? "active"
+                  : ""
               }`}
-              onClick={toggleLike}
+              onClick={
+                toggleLike
+              }
             >
+
               <span className="action-icon">
                 {liked
                   ? "❤️"
@@ -1140,6 +1252,7 @@ export default function Home() {
               <small>
                 {likeCount}
               </small>
+
             </button>
 
             <button
@@ -1150,6 +1263,7 @@ export default function Home() {
                 )
               }
             >
+
               <span className="action-icon">
                 💬
               </span>
@@ -1157,12 +1271,16 @@ export default function Home() {
               <small>
                 {comments.length}
               </small>
+
             </button>
 
             <button
               className="action-button"
-              onClick={shareNews}
+              onClick={
+                shareNews
+              }
             >
+
               <span className="action-icon">
                 ↗
               </span>
@@ -1170,14 +1288,12 @@ export default function Home() {
               <small>
                 Share
               </small>
+
             </button>
 
           </aside>
 
-          {/* ==================================================
-              AUDIO DOCK
-          ================================================== */}
-
+          {/* AUDIO DOCK */}
           {selectedAudio?.audio_url && (
             <div className="audio-dock">
 
@@ -1188,7 +1304,11 @@ export default function Home() {
                   onClick={
                     toggleAudio
                   }
-                  aria-label="Play audio"
+                  aria-label={
+                    audioPlaying
+                      ? "Pause audio"
+                      : "Play audio"
+                  }
                 >
                   {audioPlaying
                     ? "Ⅱ"
@@ -1198,10 +1318,12 @@ export default function Home() {
                 <div className="audio-info">
 
                   <div className="audio-title">
+
                     {selectedAudio.id ===
                     bulletin?.id
                       ? "आजको Audio Bulletin"
                       : "Previous Audio Bulletin"}
+
                   </div>
 
                   <div className="audio-subtitle">
@@ -1217,7 +1339,9 @@ export default function Home() {
                   }).map(
                     (_, index) => (
                       <span
-                        key={index}
+                        key={
+                          index
+                        }
                         className={
                           audioPlaying
                             ? "wave-bar playing"
@@ -1282,22 +1406,22 @@ export default function Home() {
             </div>
           )}
 
-          {/* ==================================================
-              PREVIOUS BULLETINS
-          ================================================== */}
-
+          {/* PREVIOUS BULLETINS */}
           {history.length > 1 && (
             <div className="previous-bulletins">
 
               <div className="previous-header">
+
                 <div>
+
                   <strong>
                     Previous Bulletins
                   </strong>
 
                   <span>
-                    पुराना audio
+                    पुरानो audio
                   </span>
+
                 </div>
 
                 {loadingHistory && (
@@ -1305,6 +1429,7 @@ export default function Home() {
                     अपडेट हुँदैछ...
                   </small>
                 )}
+
               </div>
 
               <div className="previous-list">
@@ -1335,11 +1460,13 @@ export default function Home() {
                       >
 
                         <div className="previous-play">
+
                           {selectedAudio?.id ===
                             item.id &&
                           audioPlaying
                             ? "Ⅱ"
                             : "▶"}
+
                         </div>
 
                         <div className="previous-info">
@@ -1372,14 +1499,13 @@ export default function Home() {
             </div>
           )}
 
-          {/* NEXT UPDATE */}
-
           <div className="next-update">
-            <span className="update-dot" />
-            हरेक घण्टा नयाँ bulletin
-          </div>
 
-          {/* NAV */}
+            <span className="update-dot" />
+
+            हरेक घण्टा नयाँ bulletin
+
+          </div>
 
           <nav className="bottom-nav">
 
@@ -1390,9 +1516,11 @@ export default function Home() {
               }
             >
               <span>⌂</span>
+
               <small>
                 Home
               </small>
+
             </button>
 
             <button
@@ -1402,9 +1530,11 @@ export default function Home() {
               }
             >
               <span>⌕</span>
+
               <small>
                 Search
               </small>
+
             </button>
 
             <button
@@ -1425,9 +1555,11 @@ export default function Home() {
               }
             >
               <span>♢</span>
+
               <small>
                 Alerts
               </small>
+
             </button>
 
             <button
@@ -1437,9 +1569,11 @@ export default function Home() {
               }
             >
               <span>◯</span>
+
               <small>
                 Profile
               </small>
+
             </button>
 
           </nav>
@@ -1447,10 +1581,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* ==================================================
-          SEARCH
-      ================================================== */}
-
+      {/* SEARCH */}
       {panel === "search" && (
         <section className="full-panel">
 
@@ -1475,7 +1606,9 @@ export default function Home() {
 
           <div className="search-box">
 
-            <span>⌕</span>
+            <span>
+              ⌕
+            </span>
 
             <input
               value={
@@ -1581,10 +1714,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* ==================================================
-          CHAT
-      ================================================== */}
-
+      {/* CHAT */}
       {panel === "chat" && (
         <section className="chat-screen">
 
@@ -1765,10 +1895,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* ==================================================
-          ALERTS
-      ================================================== */}
-
+      {/* ALERTS */}
       {panel === "alerts" && (
         <section className="full-panel">
 
@@ -1872,10 +1999,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* ==================================================
-          PROFILE
-      ================================================== */}
-
+      {/* PROFILE */}
       {panel === "profile" && (
         <section className="full-panel">
 
@@ -1975,10 +2099,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* ==================================================
-          COMMENTS
-      ================================================== */}
-
+      {/* COMMENTS */}
       {showComments && (
         <div className="overlay">
 
