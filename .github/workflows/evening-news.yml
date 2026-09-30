@@ -18,6 +18,6 @@ jobs:
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl --fail-with-body -sS `
-            -H "Authorization: Bearer ${CRON_SECRET}" `
+          curl --fail-with-body -sS \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
             "https://kisanbk-7ywr.vercel.app/api/cron/hourly-news"
