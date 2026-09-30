@@ -18,6 +18,23 @@ jobs:
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl --fail-with-body -sS \
+          echo "Starting Aaja Ke Chha hourly news..."
+          echo "Calling production API..."
+
+          RESPONSE=$(curl -sS \
+            -w "\nHTTP_STATUS:%{http_code}" \
             -H "Authorization: Bearer ${CRON_SECRET}" \
-            "https://kisanbk-7ywr.vercel.app/api/cron/hourly-news"
+            "https://kisanbk-7ywr.vercel.app/api/cron/hourly-news")
+
+          echo "$RESPONSE"
+
+          STATUS=$(echo "$RESPONSE" | sed -n 's/HTTP_STATUS://p')
+
+          echo "HTTP Status: $STATUS"
+
+          if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 300 ]; then
+            echo "Hourly news API failed."
+            exit 1
+          fi
+
+          echo "Hourly news API completed successfully."
