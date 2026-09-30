@@ -5,71 +5,41 @@ import { createClient } from "@supabase/supabase-js";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// ======================================================
-// SETTINGS
-// ======================================================
-
-const TEXT_MODELS = [
-  "gemini-3.5-flash-lite",
-  "gemini-3.5-flash",
-  "gemini-3.6-flash",
-  "gemini-3.7-flash",
-];
-
-const TTS_MODELS = [
-  "gemini-3.8-flash-tts",
-  "gemini-3.8-flash-lite-tts",
-];
-
 const MAX_NEWS = 40;
 const MAX_BULLETIN_STORIES = 12;
-
 const AUDIO_BUCKET = "audio";
 const SAMPLE_RATE = 24000;
 
-// ======================================================
-// HELPERS
-// ======================================================
+/* =========================================================
+   HELPERS
+========================================================= */
 
 function cleanText(value) {
-  if (!value) return "";
+  if (value === null || value === undefined) return "";
 
   return String(value)
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/https?:\/\/\S+/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function getNewsText(item) {
-  return cleanText(
-    item.summary ||
-      item.content ||
-      item.description ||
-      item.title ||
-      ""
-  );
 }
 
 function normalizeTitle(title) {
   return cleanText(title)
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function getSource(item) {
-  const link = item.url || item.link || "";
-
-  if (!link) {
-    return cleanText(item.source || "");
-  }
-
-  try {
-    return new URL(link).hostname.replace(/^www\./, "");
-  } catch {
-    return cleanText(item.source || "");
-  }
+  return cleanText(
+    item?.source ||
+      item?.source_name ||
+      item?.publisher ||
+      item?.site_name ||
+      "समाचार स्रोत"
+  );
 }
 
 function sleep(ms) {
@@ -78,184 +48,471 @@ function sleep(ms) {
 
 function isTemporaryGeminiError(error) {
   const message =
-    error instanceof Error
-      ? error.message
-      : String(error);
+    error instanceof Error ? error.message : String(error);
 
   return (
-    message.includes("503") ||
-    message.includes("429") ||
-    message.includes("UNAVAILABLE") ||
-    message.toLowerCase().includes("high demand") ||
-    message.toLowerCase().includes("overloaded") ||
-    message.toLowerCase().includes("rate limit") ||
-    message.toLowerCase().includes("temporarily")
+    /429|rate.?limit|quota|resource.?exhausted|503|500|overloaded|temporar/i.test(
+      message
+    )
   );
 }
 
-// ======================================================
-// PCM -> WAV
-// ======================================================
+/* =========================================================
+   GEMINI TEXT GENERATION
+========================================================= */
 
-function pcmToWav(
-  pcmBuffer,
-  sampleRate = 24000,
-  channels = 1
-) {
-  const bitsPerSample = 16;
+async function generateTextWithRetry(ai, prompt) {
+  const models = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+  ];
 
-  const byteRate =
-    sampleRate *
-    channels *
-    (bitsPerSample / 8);
-
-  const blockAlign =
-    channels *
-    (bitsPerSample / 8);
-
-  const wav = Buffer.alloc(
-    44 + pcmBuffer.length
-  );
-
-  wav.write("RIFF", 0);
-
-  wav.writeUInt32LE(
-    36 + pcmBuffer.length,
-    4
-  );
-
-  wav.write("WAVE", 8);
-
-  wav.write("fmt ", 12);
-
-  wav.writeUInt32LE(16, 16);
-
-  wav.writeUInt16LE(1, 20);
-
-  wav.writeUInt16LE(
-    channels,
-    22
-  );
-
-  wav.writeUInt32LE(
-    sampleRate,
-    24
-  );
-
-  wav.writeUInt32LE(
-    byteRate,
-    28
-  );
-
-  wav.writeUInt16LE(
-    blockAlign,
-    32
-  );
-
-  wav.writeUInt16LE(
-    bitsPerSample,
-    34
-  );
-
-  wav.write("data", 36);
-
-  wav.writeUInt32LE(
-    pcmBuffer.length,
-    40
-  );
-
-  pcmBuffer.copy(wav, 44);
-
-  return wav;
-}
-
-// ======================================================
-// GEMINI TEXT GENERATION
-// ======================================================
-
-async function generateNewsScript(ai, prompt) {
   let lastError = null;
 
-  for (const model of TEXT_MODELS) {
+  for (const model of models) {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         console.log(
           `Gemini text attempt ${attempt}/3 using ${model}...`
         );
 
-        const response =
-          await ai.models.generateContent({
-            model,
-            contents: prompt,
-          });
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+        });
 
-        const text = cleanText(
-          response?.text || ""
-        );
+        const text =
+          response?.text ||
+          response?.candidates?.[0]?.content?.parts
+            ?.map((part) => part?.text || "")
+            .join("") ||
+          "";
 
-        if (!text) {
-          throw new Error(
-            `Gemini ${model} ले खाली response दियो`
-          );
+        if (!text.trim()) {
+          throw new Error("Gemini returned empty text");
         }
 
         console.log(
           `Gemini text success using ${model}`
         );
 
-        return text;
+        return text.trim();
       } catch (error) {
         lastError = error;
 
         console.error(
-          `Gemini ${model} attempt ${attempt} failed:`,
-          error instanceof Error
-            ? error.message
-            : String(error)
+          `Gemini text failed using ${model}, attempt ${attempt}:`,
+          error
         );
 
-        if (
-          !isTemporaryGeminiError(error)
-        ) {
-          throw error;
+        if (!isTemporaryGeminiError(error)) {
+          break;
         }
 
-        if (attempt < 3) {
-          const delay =
-            attempt === 1
-              ? 5000
-              : 10000;
-
-          console.log(
-            `Temporary Gemini error. Waiting ${delay / 1000}s...`
-          );
-
-          await sleep(delay);
-        }
+        await sleep(1500 * attempt);
       }
     }
+  }
 
-    console.log(
-      `Model ${model} unavailable after retries. Trying fallback model...`
+  throw lastError || new Error("Gemini text generation failed");
+}
+
+/* =========================================================
+   CLEAN GENERATED SCRIPT
+========================================================= */
+
+function cleanGeneratedScript(text) {
+  let script = String(text || "");
+
+  script = script
+    .replace(/^```[\s\S]*?\n/, "")
+    .replace(/```$/g, "")
+    .replace(/^["']|["']$/g, "")
+    .replace(/\*\*/g, "")
+    .replace(/^#+\s*/gm, "")
+    .replace(/^\s*[-*•]\s*/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  // Remove accidental meta instructions if Gemini puts them in output.
+  const forbiddenStarts = [
+    "यहाँ तपाईंले",
+    "निर्देशन अनुसार",
+    "यसरी पढ्नुहोस्",
+    "शान्त भएर पढ्नुहोस्",
+    "व्यावसायिक रूपमा पढ्नुहोस्",
+    "professional voice",
+    "director's notes",
+    "audio profile",
+    "transcript:",
+  ];
+
+  const lines = script
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => {
+      const lower = line.toLowerCase();
+
+      return !forbiddenStarts.some((item) =>
+        lower.startsWith(item.toLowerCase())
+      );
+    });
+
+  script = lines.join(" ");
+
+  return script.trim();
+}
+
+/* =========================================================
+   FETCH NEWS
+========================================================= */
+
+async function fetchNews(supabase) {
+  console.log(
+    `Fetching latest ${MAX_NEWS} news items...`
+  );
+
+  const { data, error } = await supabase
+    .from("news")
+    .select(
+      "id,title,source,url,content,summary,audio_url,status,published_at,created_at,updated_at"
+    )
+    .order("published_at", {
+      ascending: false,
+    })
+    .limit(MAX_NEWS);
+
+  if (error) {
+    throw new Error(
+      `Supabase news error: ${error.message}`
     );
   }
 
-  throw (
-    lastError ||
-    new Error(
-      "कुनै पनि Gemini text model ले response दिएन"
-    )
+  const news = Array.isArray(data) ? data : [];
+
+  console.log(
+    `Fetched ${news.length} news items`
+  );
+
+  return news;
+}
+
+/* =========================================================
+   DEDUPLICATE NEWS
+========================================================= */
+
+function selectUniqueNews(news) {
+  const seen = new Set();
+  const unique = [];
+
+  for (const item of news) {
+    const title = normalizeTitle(item?.title);
+
+    if (!title) continue;
+
+    if (seen.has(title)) {
+      continue;
+    }
+
+    seen.add(title);
+    unique.push(item);
+  }
+
+  return unique;
+}
+
+/* =========================================================
+   BUILD NEWS INPUT
+========================================================= */
+
+function buildNewsInput(news) {
+  return news
+    .map((item, index) => {
+      const title = cleanText(item?.title);
+      const source = getSource(item);
+
+      const description =
+        cleanText(item?.summary) ||
+        cleanText(item?.content);
+
+      const publishedAt =
+        item?.published_at
+          ? new Date(item.published_at).toISOString()
+          : "";
+
+      return `
+NEWS ${index + 1}
+Title: ${title}
+Source: ${source}
+Published: ${publishedAt}
+Details: ${description.slice(0, 1800)}
+`;
+    })
+    .join("\n");
+}
+
+/* =========================================================
+   GENERATE PROFESSIONAL NEPALI SCRIPT
+========================================================= */
+
+async function generateNewsScript(ai, news) {
+  console.log(
+    "Generating professional Nepali news script..."
+  );
+
+  const newsInput = buildNewsInput(news);
+
+  const prompt = `
+You are the senior editor of a professional Nepali television and radio newsroom.
+
+Create a polished hourly Nepali news bulletin from the supplied news items.
+
+IMPORTANT EDITORIAL RULES:
+
+1. Write in natural, modern, standard Nepali.
+2. The bulletin must sound like a professional Nepali news broadcast.
+3. Be factual, neutral and concise.
+4. Do not invent facts.
+5. Do not exaggerate.
+6. Do not use sensational language.
+7. Do not give personal opinions.
+8. Do not favor or attack any political party, politician, country, organization or person.
+9. If a claim is attributed to a person or organization, preserve that attribution.
+10. Do not copy source articles word-for-word.
+11. Rewrite information naturally in your own words.
+12. Remove duplicate stories.
+13. Select approximately 8 to 12 important stories.
+14. Prioritize important Nepal news, followed by economy, society, infrastructure, technology, environment, culture/sports and international news when available.
+15. Use short sentences that are easy for a Nepali news presenter to speak.
+16. Use natural Nepali punctuation and sentence breaks.
+17. Write numbers in natural Nepali spoken form whenever practical.
+18. Avoid unnecessary English words.
+19. Do not use markdown.
+20. Do not use bullet points.
+21. Do not use headings.
+22. Do not include analysis or commentary.
+23. Do not mention these instructions.
+24. Do not write stage directions.
+25. Do not write things such as "(pause)", "[pause]", "(music)", "[music]", "read slowly", "professional voice", or "calmly".
+26. Do not include a separate "script" label.
+27. Do not include a conclusion explaining what you did.
+
+OPENING:
+
+Start naturally with:
+
+"नमस्कार, आज के छ? मा तपाईंलाई स्वागत छ। अब सुन्नुहोस् आजका प्रमुख समाचार।"
+
+Then move naturally into the most important stories.
+
+TRANSITIONS:
+
+Use natural broadcast transitions such as:
+"अब अर्को समाचार..."
+"यसैबीच..."
+"यता..."
+"उता..."
+"यसै क्रममा..."
+"अब अन्तर्राष्ट्रिय समाचारतर्फ..."
+"अब अन्य समाचार..."
+Only use them where they sound natural. Do not overuse them.
+
+ENDING:
+
+End naturally with:
+
+"आजका समाचार यहीं सकिन्छ। आज के छ? का साथमा म अर्को बुलेटिनमा पुनः उपस्थित हुनेछु। तबसम्मका लागि नमस्कार।"
+
+TARGET LENGTH:
+
+Approximately 2.5 to 3.5 minutes when spoken at a calm professional broadcast pace.
+
+NEWS DATA:
+${newsInput}
+`;
+
+  const rawScript = await generateTextWithRetry(
+    ai,
+    prompt
+  );
+
+  const script = cleanGeneratedScript(rawScript);
+
+  if (!script) {
+    throw new Error(
+      "Generated news script is empty"
+    );
+  }
+
+  console.log(
+    "SCRIPT LENGTH:",
+    script.length
+  );
+
+  return script;
+}
+
+/* =========================================================
+   PCM → WAV
+========================================================= */
+
+function pcmToWav(
+  pcmBuffer,
+  sampleRate = SAMPLE_RATE,
+  channels = 1,
+  bitsPerSample = 16
+) {
+  const dataSize = pcmBuffer.length;
+  const headerSize = 44;
+  const wavBuffer = Buffer.alloc(
+    headerSize + dataSize
+  );
+
+  wavBuffer.write("RIFF", 0);
+  wavBuffer.writeUInt32LE(
+    36 + dataSize,
+    4
+  );
+  wavBuffer.write("WAVE", 8);
+
+  wavBuffer.write("fmt ", 12);
+  wavBuffer.writeUInt32LE(16, 16);
+  wavBuffer.writeUInt16LE(1, 20);
+  wavBuffer.writeUInt16LE(channels, 22);
+  wavBuffer.writeUInt32LE(
+    sampleRate,
+    24
+  );
+
+  const byteRate =
+    sampleRate *
+    channels *
+    (bitsPerSample / 8);
+
+  wavBuffer.writeUInt32LE(
+    byteRate,
+    28
+  );
+
+  const blockAlign =
+    channels *
+    (bitsPerSample / 8);
+
+  wavBuffer.writeUInt16LE(
+    blockAlign,
+    32
+  );
+
+  wavBuffer.writeUInt16LE(
+    bitsPerSample,
+    34
+  );
+
+  wavBuffer.write("data", 36);
+  wavBuffer.writeUInt32LE(
+    dataSize,
+    40
+  );
+
+  pcmBuffer.copy(wavBuffer, 44);
+
+  return wavBuffer;
+}
+
+/* =========================================================
+   EXTRACT AUDIO DATA
+========================================================= */
+
+function extractPcmFromResponse(response) {
+  const part =
+    response?.candidates?.[0]?.content?.parts?.find(
+      (p) => p?.inlineData?.data
+    );
+
+  if (!part?.inlineData?.data) {
+    throw new Error(
+      "Gemini TTS returned no audio data"
+    );
+  }
+
+  return Buffer.from(
+    part.inlineData.data,
+    "base64"
   );
 }
 
-// ======================================================
-// GEMINI TTS
-// ======================================================
+/* =========================================================
+   GEMINI TTS
+========================================================= */
 
-async function generateSpeech(ai, script) {
+async function generateVoiceWithRetry(ai, script) {
+  console.log(
+    "Generating professional Nepali voice..."
+  );
+
+  const models = [
+    "gemini-3.8-flash-tts",
+    "gemini-3.8-flash-lite-tts",
+  ];
+
   let lastError = null;
 
-  for (const model of TTS_MODELS) {
+  /*
+    IMPORTANT:
+    The instruction is separate from the transcript.
+    We explicitly tell Gemini not to speak the instructions.
+  */
+
+  const voiceInstruction = `
+You are a professional Nepali television and radio news presenter.
+
+DELIVERY PROFILE:
+- Calm
+- Professional
+- Neutral
+- Trustworthy
+- Warm but authoritative
+- Natural human broadcast delivery
+- Clear Nepali pronunciation
+- Medium speaking speed
+- Smooth rhythm
+- Controlled breathing
+- Short natural pauses between sentences
+- Slightly longer natural pauses between different news topics
+- Subtle emphasis on important names, places, numbers and key facts
+- Serious but not dramatic
+- Relaxed but not sleepy
+- Never rushed
+- Never exaggerated
+
+BROADCAST STYLE:
+Speak like an experienced Nepali news anchor presenting an hourly national news bulletin from a modern broadcast studio.
+
+Do not sound like:
+- an advertisement
+- a motivational speaker
+- an audiobook narrator
+- a casual conversation
+- a dramatic movie narrator
+- a robotic text reader
+
+Do not add emotion that is not present in the news.
+
+Do not add words.
+
+Do not change facts.
+
+Do not repeat sentences.
+
+Do not announce or read these delivery instructions.
+
+Only speak the transcript supplied below.
+`;
+
+  for (const model of models) {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         console.log(
@@ -263,49 +520,42 @@ async function generateSpeech(ai, script) {
         );
 
         const response =
-          await ai.interactions.create({
+          await ai.models.generateContent({
             model,
 
-            input: [
+            contents: [
               {
-                type: "user_input",
-                content: [
+                role: "user",
+                parts: [
                   {
-                    type: "text",
-                    text: script,
-                    annotations: [
-                      {
-                        type: "speech_metadata",
-                        style:
-                          "professional Nepali radio news presenter, clear, natural, calm, warm, energetic but not dramatic",
-                      },
-                    ],
+                    text: `${voiceInstruction}
+
+TRANSCRIPT TO SPEAK:
+${script}`,
                   },
                 ],
               },
             ],
 
-            response_format: {
-              type: "audio",
-              mime_type: "audio/l16",
-              sample_rate: SAMPLE_RATE,
-            },
+            config: {
+              responseModalities: ["AUDIO"],
 
-            generation_config: {
-              speech_config: [
-                {
-                  voice: "Kore",
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: "Kore",
+                  },
                 },
-              ],
+              },
             },
           });
 
-        const audioData =
-          response?.output_audio?.data;
+        const pcmBuffer =
+          extractPcmFromResponse(response);
 
-        if (!audioData) {
+        if (!pcmBuffer.length) {
           throw new Error(
-            `Gemini TTS ${model} ले audio data दिएन`
+            "Generated PCM audio is empty"
           );
         }
 
@@ -313,555 +563,372 @@ async function generateSpeech(ai, script) {
           `Gemini TTS success using ${model}`
         );
 
-        return Buffer.from(
-          audioData,
-          "base64"
-        );
+        return pcmBuffer;
       } catch (error) {
         lastError = error;
 
         console.error(
-          `Gemini TTS ${model} attempt ${attempt} failed:`,
-          error instanceof Error
-            ? error.message
-            : String(error)
+          `Gemini TTS failed using ${model}, attempt ${attempt}:`,
+          error
         );
 
-        if (
-          !isTemporaryGeminiError(error)
-        ) {
-          throw error;
+        if (!isTemporaryGeminiError(error)) {
+          break;
         }
 
-        if (attempt < 3) {
-          const delay =
-            attempt === 1
-              ? 5000
-              : 10000;
-
-          console.log(
-            `Temporary TTS error. Waiting ${delay / 1000}s...`
-          );
-
-          await sleep(delay);
-        }
+        await sleep(1500 * attempt);
       }
     }
-
-    console.log(
-      `TTS model ${model} unavailable. Trying fallback...`
-    );
   }
 
   throw (
     lastError ||
-    new Error(
-      "कुनै पनि Gemini TTS model ले audio दिएन"
-    )
+    new Error("Gemini TTS generation failed")
   );
 }
 
-// ======================================================
-// MAIN
-// ======================================================
+/* =========================================================
+   CREATE AUDIO BULLETIN
+========================================================= */
 
 async function createAudioBulletin() {
-  let step = "start";
+  console.log("================================");
+  console.log("AI AUDIO BULLETIN START");
+  console.log("================================");
 
-  try {
-    // --------------------------------------------------
-    // ENV
-    // --------------------------------------------------
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
 
-    const supabaseUrl =
-      process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-    const supabaseKey =
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const geminiApiKey =
+    process.env.GEMINI_API_KEY;
 
-    const geminiKey =
-      process.env.GEMINI_API_KEY;
+  if (!supabaseUrl) {
+    throw new Error(
+      "NEXT_PUBLIC_SUPABASE_URL is missing"
+    );
+  }
 
-    if (!supabaseUrl) {
-      throw new Error(
-        "NEXT_PUBLIC_SUPABASE_URL is missing"
-      );
+  if (!supabaseKey) {
+    throw new Error(
+      "Supabase key is missing"
+    );
+  }
+
+  if (!geminiApiKey) {
+    throw new Error(
+      "GEMINI_API_KEY is missing"
+    );
+  }
+
+  console.log(
+    "Environment variables: OK"
+  );
+
+  const supabase = createClient(
+    supabaseUrl,
+    supabaseKey,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
     }
+  );
 
-    if (!supabaseKey) {
-      throw new Error(
-        "NEXT_PUBLIC_SUPABASE_ANON_KEY is missing"
-      );
-    }
+  console.log(
+    "Supabase client: OK"
+  );
 
-    if (!geminiKey) {
-      throw new Error(
-        "GEMINI_API_KEY is missing"
-      );
-    }
+  const ai = new GoogleGenAI({
+    apiKey: geminiApiKey,
+  });
 
-    console.log(
-      "Environment variables: OK"
+  console.log(
+    "Gemini client: OK"
+  );
+
+  /* -----------------------------------------
+     FETCH
+  ----------------------------------------- */
+
+  const news = await fetchNews(
+    supabase
+  );
+
+  if (!news.length) {
+    throw new Error(
+      "No news items found in news table"
+    );
+  }
+
+  /* -----------------------------------------
+     DEDUPE
+  ----------------------------------------- */
+
+  const uniqueNews =
+    selectUniqueNews(news);
+
+  console.log(
+    `Selected ${uniqueNews.length} unique stories from ${news.length} fetched stories`
+  );
+
+  const selectedNews =
+    uniqueNews.slice(
+      0,
+      MAX_BULLETIN_STORIES
     );
 
-    // --------------------------------------------------
-    // CLIENTS
-    // --------------------------------------------------
-
-    step = "supabase-client";
-
-    const supabase =
-      createClient(
-        supabaseUrl,
-        supabaseKey
-      );
-
-    const ai =
-      new GoogleGenAI({
-        apiKey: geminiKey,
-      });
-
-    console.log(
-      "Supabase client: OK"
+  if (!selectedNews.length) {
+    throw new Error(
+      "No usable news stories found"
     );
+  }
 
-    console.log(
-      "Gemini client: OK"
-    );
+  console.log(
+    `Using ${selectedNews.length} stories for bulletin`
+  );
 
-    // --------------------------------------------------
-    // 1. FETCH NEWS
-    // --------------------------------------------------
+  /* -----------------------------------------
+     SCRIPT
+  ----------------------------------------- */
 
-    step = "fetch-news";
-
-    console.log(
-      `Fetching latest ${MAX_NEWS} news items...`
-    );
-
-    const {
-      data: news,
-      error: newsError,
-    } = await supabase
-      .from("news")
-      .select("*")
-      .order("published_at", {
-        ascending: false,
-      })
-      .limit(MAX_NEWS);
-
-    if (newsError) {
-      throw new Error(
-        `Supabase news error: ${newsError.message}`
-      );
-    }
-
-    if (!news || news.length === 0) {
-      throw new Error(
-        "news table मा कुनै news भेटिएन"
-      );
-    }
-
-    console.log(
-      `Fetched ${news.length} news items`
-    );
-
-    // --------------------------------------------------
-    // 2. REMOVE DUPLICATES
-    // --------------------------------------------------
-
-    step = "dedupe";
-
-    const seenTitles = new Set();
-    const uniqueNews = [];
-
-    for (const item of news) {
-      const title = cleanText(
-        item.title
-      );
-
-      if (!title) continue;
-
-      const key =
-        normalizeTitle(title);
-
-      if (!key) continue;
-
-      if (seenTitles.has(key)) {
-        continue;
-      }
-
-      seenTitles.add(key);
-
-      uniqueNews.push(item);
-    }
-
-    console.log(
-      `Selected ${uniqueNews.length} unique stories from ${news.length} fetched stories`
-    );
-
-    if (uniqueNews.length === 0) {
-      throw new Error(
-        "Valid news भेटिएन"
-      );
-    }
-
-    // --------------------------------------------------
-    // 3. LIMIT STORIES
-    // --------------------------------------------------
-
-    const selectedNews =
-      uniqueNews.slice(
-        0,
-        MAX_BULLETIN_STORIES
-      );
-
-    // --------------------------------------------------
-    // 4. PREPARE NEWS FOR GEMINI
-    // --------------------------------------------------
-
-    step = "prepare-news";
-
-    const newsForAI =
+  const script =
+    await generateNewsScript(
+      ai,
       selectedNews
-        .map((item, index) => {
-          const title =
-            cleanText(item.title);
-
-          const content =
-            getNewsText(item)
-              .slice(0, 700);
-
-          const source =
-            getSource(item);
-
-          return `
-समाचार ${index + 1}
-
-शीर्षक: ${title}
-
-विवरण: ${content}
-
-स्रोत: ${source}
-`;
-        })
-        .join("\n");
-
-    // --------------------------------------------------
-    // 5. GEMINI EDITOR
-    // --------------------------------------------------
-
-    step = "gemini-summary";
-
-    console.log(
-      "Generating Nepali news script..."
     );
 
-    const summaryPrompt = `
-तपाईं "आज के छ?" नामको नेपाली hourly audio news bulletin का मुख्य समाचार सम्पादक हुनुहुन्छ।
+  /* -----------------------------------------
+     TTS
+  ----------------------------------------- */
 
-तल विभिन्न नेपाली तथा अन्तर्राष्ट्रिय समाचार स्रोतबाट आएका समाचारहरू छन्।
-
-यी समाचारका उपलब्ध तथ्यका आधारमा करिब ३ मिनेटको प्राकृतिक नेपाली audio news bulletin तयार गर्नुहोस्।
-
-मुख्य category:
-
-१. राजनीति
-२. समाज
-३. प्रविधि
-४. वातावरण
-५. विश्व
-
-समाचार छनोट गर्दा:
-
-नेपालका महत्वपूर्ण राष्ट्रिय समाचारलाई प्राथमिकता दिनुहोस्।
-
-राजनीतिमा:
-नेपाल सरकारका महत्वपूर्ण निर्णय, प्रधानमन्त्री तथा मन्त्रिपरिषद्का निर्णय, संसद्, निर्वाचनसम्बन्धी महत्वपूर्ण घटनाक्रम, प्रमुख राजनीतिक घटनाक्रम, संविधान, सर्वोच्च अदालत तथा राज्य व्यवस्थासँग सम्बन्धित महत्वपूर्ण विषय समेट्नुहोस्।
-
-समाजमा:
-जनजीवन, शिक्षा, स्वास्थ्य, अपराध तथा सुरक्षा, दुर्घटना, विपद् र जनहितका महत्वपूर्ण विषय समेट्नुहोस्।
-
-प्रविधिमा:
-AI, नयाँ technology, cybersecurity, digital services, mobile/internet तथा महत्वपूर्ण innovation समेट्नुहोस्।
-
-वातावरणमा:
-मौसम, बाढी, पहिरो, जलवायु, प्रदूषण, वन तथा वातावरण र प्राकृतिक विपद्का महत्वपूर्ण विषय समेट्नुहोस्।
-
-विश्वमा:
-अन्तर्राष्ट्रिय राजनीति, कूटनीति, युद्ध, विश्व अर्थतन्त्र र महत्वपूर्ण अन्तर्राष्ट्रिय घटनाहरू समेट्नुहोस्।
-
-अत्यन्त महत्वपूर्ण नियम:
-
-- तथ्यमा आधारित र पूर्ण रूपमा neutral रहनुहोस्।
-- कुनै राजनीतिक दल, नेता, उम्मेदवार वा विचारधाराको पक्ष वा विपक्षमा नलेख्नुहोस्।
-- आरोप र पुष्टि भएको तथ्यलाई फरक रूपमा प्रस्तुत गर्नुहोस्।
-- उपलब्ध सामग्रीमा नभएको तथ्य नबनाउनुहोस्।
-- अनुमान वा speculation नगर्नुहोस्।
-- एउटै घटनाको duplicate समाचार नदोहोऱ्याउनुहोस्।
-- source article को exact wording copy नगर्नुहोस्।
-- आफ्नै छोटो र प्राकृतिक नेपाली भाषामा पुनर्लेखन गर्नुहोस्।
-- प्रत्येक समाचारको मुख्य तथ्य र यसको महत्व छोटकरीमा बताउनुहोस्।
-- सबैभन्दा महत्वपूर्ण समाचारबाट bulletin सुरु गर्नुहोस्।
-- कम महत्वपूर्ण समाचार हटाउनुहोस्।
-- उपलब्ध तथ्यअनुसार लगभग ८ देखि १२ वटा महत्वपूर्ण समाचार समेट्नुहोस्।
-- politics लाई प्राथमिकता दिए पनि अन्य महत्वपूर्ण categories लाई पनि समेट्नुहोस्।
-- कुनै category मा महत्वपूर्ण समाचार छैन भने जबर्जस्ती समाचार नबनाउनुहोस्।
-- अन्त्यमा छोटो closing राख्नुहोस्।
-- script radio presenter ले पढ्ने जस्तो प्राकृतिक हुनुपर्छ।
-- अत्यधिक dramatic भाषा प्रयोग नगर्नुहोस्।
-- English नाम वा technical term आवश्यक भए सामान्य रूपमा प्रयोग गर्न सकिन्छ।
-- Markdown प्रयोग नगर्नुहोस्।
-- bullet points प्रयोग नगर्नुहोस्।
-- headings प्रयोग नगर्नुहोस्।
-- JSON नदिनुहोस्।
-- explanation नदिनुहोस्।
-- केवल final spoken Nepali news script दिनुहोस्।
-
-समाचारहरू:
-
-${newsForAI}
-`;
-
-    const script =
-      await generateNewsScript(
-        ai,
-        summaryPrompt
-      );
-
-    console.log(
-      `SCRIPT LENGTH: ${script.length}`
+  const pcmBuffer =
+    await generateVoiceWithRetry(
+      ai,
+      script
     );
 
-    // --------------------------------------------------
-    // 6. GEMINI TTS
-    // --------------------------------------------------
+  console.log(
+    "PCM AUDIO SIZE:",
+    pcmBuffer.length,
+    "bytes"
+  );
 
-    step = "gemini-tts";
-
-    console.log(
-      "Generating Nepali voice..."
+  const wavBuffer =
+    pcmToWav(
+      pcmBuffer,
+      SAMPLE_RATE,
+      1,
+      16
     );
 
-    const pcmBuffer =
-      await generateSpeech(
-        ai,
-        script
-      );
+  console.log(
+    "WAV SIZE:",
+    wavBuffer.length,
+    "bytes"
+  );
 
-    if (
-      !pcmBuffer ||
-      !pcmBuffer.length
-    ) {
-      throw new Error(
-        "Audio buffer empty छ"
-      );
-    }
+  /* -----------------------------------------
+     STORAGE
+  ----------------------------------------- */
 
-    console.log(
-      `PCM AUDIO SIZE: ${pcmBuffer.length} bytes`
+  const fileName =
+    `bulletin-${Date.now()}.wav`;
+
+  console.log(
+    `Uploading ${fileName}...`
+  );
+
+  const {
+    error: uploadError,
+  } = await supabase.storage
+    .from(AUDIO_BUCKET)
+    .upload(
+      fileName,
+      wavBuffer,
+      {
+        contentType: "audio/wav",
+        cacheControl: "3600",
+        upsert: false,
+      }
     );
 
-    // --------------------------------------------------
-    // 7. PCM -> WAV
-    // --------------------------------------------------
-
-    step = "convert-audio";
-
-    const wavBuffer =
-      pcmToWav(
-        pcmBuffer,
-        SAMPLE_RATE,
-        1
-      );
-
-    console.log(
-      `WAV SIZE: ${wavBuffer.length} bytes`
+  if (uploadError) {
+    throw new Error(
+      `Audio upload error: ${uploadError.message}`
     );
+  }
 
-    // --------------------------------------------------
-    // 8. UPLOAD
-    // --------------------------------------------------
-
-    step = "upload-supabase";
-
-    const fileName =
-      `bulletin-${Date.now()}.wav`;
-
-    console.log(
-      `Uploading ${fileName}...`
-    );
-
-    const {
-      error: uploadError,
-    } = await supabase.storage
-      .from(AUDIO_BUCKET)
-      .upload(
-        fileName,
-        wavBuffer,
-        {
-          contentType: "audio/wav",
-          cacheControl: "3600",
-          upsert: true,
-        }
-      );
-
-    if (uploadError) {
-      throw new Error(
-        `Supabase audio upload error: ${uploadError.message}`
-      );
-    }
-
-    // --------------------------------------------------
-    // 9. PUBLIC URL
-    // --------------------------------------------------
-
-    step = "public-url";
-
-    const {
-      data: publicUrlData,
-    } = supabase.storage
+  const {
+    data: publicUrlData,
+  } =
+    supabase.storage
       .from(AUDIO_BUCKET)
       .getPublicUrl(fileName);
 
-    const audioUrl =
-      publicUrlData?.publicUrl;
+  const audioUrl =
+    publicUrlData?.publicUrl;
 
-    if (!audioUrl) {
-      throw new Error(
-        "Audio public URL बन्न सकेन"
-      );
-    }
-
-    console.log(
-      "Audio URL created:"
+  if (!audioUrl) {
+    throw new Error(
+      "Could not create public audio URL"
     );
+  }
 
-    console.log(audioUrl);
+  console.log(
+    "Audio URL created:"
+  );
 
-    // --------------------------------------------------
-    // 10. SAVE AUDIO URL
-    // --------------------------------------------------
+  console.log(audioUrl);
 
-    step = "save-news-audio";
+  /* -----------------------------------------
+     SAVE BULLETIN
+  ----------------------------------------- */
 
-    const firstNewsId =
-      selectedNews[0]?.id;
+  console.log(
+    "Saving new bulletin to Supabase..."
+  );
 
-    if (firstNewsId) {
-      const {
-        error: updateError,
-      } = await supabase
-        .from("news")
-        .update({
-          audio_url: audioUrl,
-          updated_at:
-            new Date().toISOString(),
-        })
-        .eq(
-          "id",
-          firstNewsId
-        );
+  const bulletinTitle =
+    "आजका मुख्य समाचार";
 
-      if (updateError) {
-        console.warn(
-          "News audio_url update warning:",
-          updateError.message
-        );
-      }
-    }
+  const bulletinSummary =
+    `आजका ${selectedNews.length} प्रमुख समाचार समेटिएको AI audio bulletin।`;
 
-    // --------------------------------------------------
-    // COMPLETE
-    // --------------------------------------------------
-
-    step = "complete";
-
-    console.log(
-      "================================"
-    );
-
-    console.log(
-      "AI AUDIO BULLETIN COMPLETE"
-    );
-
-    console.log(
-      "================================"
-    );
-
-    return {
-      success: true,
-
-      message:
-        "Nepali AI audio bulletin तयार भयो",
-
-      audio_url:
-        audioUrl,
-
-      file:
-        fileName,
-
-      news_count:
+  const {
+    data: bulletin,
+    error: bulletinError,
+  } = await supabase
+    .from("bulletins")
+    .insert({
+      title: bulletinTitle,
+      summary: bulletinSummary,
+      script: script,
+      audio_url: audioUrl,
+      audio_file: fileName,
+      story_count:
         selectedNews.length,
+      published_at:
+        new Date().toISOString(),
+    })
+    .select(
+      "id,title,summary,script,audio_url,audio_file,story_count,published_at,created_at"
+    )
+    .single();
 
-      script_length:
-        script.length,
+  if (bulletinError) {
+    console.error(
+      "BULLETIN INSERT ERROR:",
+      bulletinError
+    );
 
-      script,
-    };
+    throw new Error(
+      `Supabase bulletin error: ${bulletinError.message}`
+    );
+  }
+
+  console.log(
+    "NEW BULLETIN CREATED:"
+  );
+
+  console.log(bulletin);
+
+  /*
+    We intentionally skip bulletin_stories here because
+    the exact schema of that table is not required for
+    audio playback and has not been confirmed.
+  */
+
+  console.log(
+    "Bulletin story linking skipped."
+  );
+
+  console.log("================================");
+  console.log(
+    "AI AUDIO BULLETIN COMPLETE"
+  );
+  console.log("================================");
+
+  return {
+    success: true,
+    message:
+      "Professional Nepali AI audio bulletin तयार भयो",
+    bulletin_id: bulletin.id,
+    bulletin,
+    audio_url: audioUrl,
+    file: fileName,
+    news_count:
+      selectedNews.length,
+    script_length:
+      script.length,
+    script,
+  };
+}
+
+/* =========================================================
+   POST
+========================================================= */
+
+export async function POST() {
+  try {
+    const result =
+      await createAudioBulletin();
+
+    return NextResponse.json(
+      result,
+      { status: 200 }
+    );
   } catch (error) {
     console.error(
-      "NEWS AUDIO ERROR:",
+      "AI AUDIO BULLETIN ERROR:",
       error
     );
 
-    return {
-      success: false,
-
-      step,
-
-      error:
-        error instanceof Error
-          ? error.message
-          : String(error),
-    };
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown audio generation error",
+      },
+      { status: 500 }
+    );
   }
 }
 
-// ======================================================
-// POST
-// ======================================================
-
-export async function POST() {
-  const result =
-    await createAudioBulletin();
-
-  return NextResponse.json(
-    result,
-    {
-      status:
-        result.success
-          ? 200
-          : 500,
-    }
-  );
-}
-
-// ======================================================
-// GET
-// ======================================================
+/* =========================================================
+   GET
+========================================================= */
 
 export async function GET() {
-  const result =
-    await createAudioBulletin();
+  try {
+    const result =
+      await createAudioBulletin();
 
-  return NextResponse.json(
-    result,
-    {
-      status:
-        result.success
-          ? 200
-          : 500,
-    }
-  );
+    return NextResponse.json(
+      result,
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error(
+      "AI AUDIO BULLETIN GET ERROR:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown audio generation error",
+      },
+      { status: 500 }
+    );
+  }
 }

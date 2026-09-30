@@ -52,14 +52,10 @@ export async function GET() {
       .order("published_at", {
         ascending: false,
       })
-      .limit(1)
-      .maybeSingle();
+      .limit(24);
 
     if (error) {
-      console.error(
-        "LATEST BULLETIN SUPABASE ERROR:",
-        error
-      );
+      console.error("BULLETIN HISTORY SUPABASE ERROR:", error);
 
       return NextResponse.json(
         {
@@ -70,28 +66,12 @@ export async function GET() {
       );
     }
 
-    if (!data) {
-      return NextResponse.json({
-        success: true,
-        bulletin: null,
-        audio_url: null,
-        title: "आजका मुख्य समाचार",
-        story_count: 0,
-        message: "अहिले audio bulletin उपलब्ध छैन",
-      });
-    }
-
-    console.log("LATEST BULLETIN FOUND:", data);
-
     return NextResponse.json({
       success: true,
-      bulletin: data,
-      audio_url: data.audio_url,
-      title: data.title,
-      story_count: data.story_count,
+      bulletins: data || [],
     });
   } catch (error) {
-    console.error("LATEST BULLETIN API ERROR:", error);
+    console.error("BULLETIN HISTORY API ERROR:", error);
 
     return NextResponse.json(
       {
