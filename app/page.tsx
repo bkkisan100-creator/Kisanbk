@@ -40,7 +40,7 @@ function makeId() {
 }
 
 function shortTitle(title: string) {
-  if (!title) return "आजको मुख्य समाचार";
+  if (!title) return "";
 
   const clean = title.trim();
 
@@ -165,9 +165,15 @@ export default function Home() {
   const musicRef =
     useRef<HTMLAudioElement | null>(null);
 
+  /*
+   * ==================================================
+   * MUSIC VOLUME
+   * ==================================================
+   */
+
   useEffect(() => {
     if (musicRef.current) {
-      musicRef.current.volume = 0.005; // Music volume sosaa-sosaa (0.5%)
+      musicRef.current.volume = 0.007;
     }
   }, []);
 
@@ -235,7 +241,8 @@ export default function Home() {
       const data = await response.json();
 
       if (data?.success && data?.bulletin) {
-        const latest = data.bulletin as Bulletin;
+        const latest =
+          data.bulletin as Bulletin;
 
         setBulletin(latest);
 
@@ -313,8 +320,11 @@ export default function Home() {
    */
 
   function stopAllAudio() {
-    const newsAudio = audioRef.current;
-    const musicAudio = musicRef.current;
+    const newsAudio =
+      audioRef.current;
+
+    const musicAudio =
+      musicRef.current;
 
     if (newsAudio) {
       newsAudio.pause();
@@ -337,13 +347,13 @@ export default function Home() {
    */
 
   async function startBackgroundMusic() {
-    const music = musicRef.current;
+    const music =
+      musicRef.current;
 
     if (!music) return;
 
     try {
-      music.volume = 0.005; // Music volume sosaa-sosaa (0.5%)
-
+      music.volume = 0.005;
       music.currentTime = 0;
 
       await music.play();
@@ -362,7 +372,8 @@ export default function Home() {
    */
 
   function pauseBackgroundMusic() {
-    const music = musicRef.current;
+    const music =
+      musicRef.current;
 
     if (!music) return;
 
@@ -382,7 +393,8 @@ export default function Home() {
       return;
     }
 
-    const audio = audioRef.current;
+    const audio =
+      audioRef.current;
 
     if (!audio) {
       return;
@@ -488,7 +500,7 @@ export default function Home() {
 
   /*
    * ==================================================
-   * LATEST AUDIO
+   * PLAY LATEST
    * ==================================================
    */
 
@@ -1073,23 +1085,22 @@ export default function Home() {
     <main className="app-shell">
 
       {/* NEWS AUDIO */}
-      <audio
-        ref={audioRef}
-        src={
-          selectedAudio?.audio_url ||
-          ""
-        }
-        preload="metadata"
-        onTimeUpdate={
-          handleAudioTimeUpdate
-        }
-        onLoadedMetadata={
-          handleAudioLoadedMetadata
-        }
-        onEnded={
-          handleAudioEnded
-        }
-      />
+      {selectedAudio?.audio_url && (
+        <audio
+          ref={audioRef}
+          src={selectedAudio.audio_url}
+          preload="metadata"
+          onTimeUpdate={
+            handleAudioTimeUpdate
+          }
+          onLoadedMetadata={
+            handleAudioLoadedMetadata
+          }
+          onEnded={
+            handleAudioEnded
+          }
+        />
+      )}
 
       {/* BACKGROUND MUSIC */}
       <audio
@@ -1099,35 +1110,24 @@ export default function Home() {
         loop
       />
 
-      {/* HOME */}
+      {/* ==================================================
+          HOME
+          ================================================== */}
+
       {panel === "home" && (
         <section className="home-screen">
 
+          {/* BACKGROUND */}
           <div className="news-background">
             <div className="background-glow glow-one" />
             <div className="background-glow glow-two" />
             <div className="background-grid" />
           </div>
 
+          {/* HEADER */}
           <header className="top-header">
 
-            <div className="brand">
-
-              <div className="brand-logo">
-                आ
-              </div>
-
-              <div>
-                <div className="brand-title">
-                  आज के छ?
-                </div>
-
-                <div className="brand-subtitle">
-                  AI News
-                </div>
-              </div>
-
-            </div>
+            <div className="header-spacer" />
 
             <button
               className="icon-button notification-button"
@@ -1142,33 +1142,29 @@ export default function Home() {
 
           </header>
 
+          {/* LIVE */}
           <div className="live-pill">
             <span className="live-dot" />
             LIVE NEWS
           </div>
 
+          {/* ==================================================
+              LARGE NEWS PHOTO
+              ================================================== */}
+
           <div className="news-photo-card">
 
             <img
               src="/news-photo.jpg"
-              alt="आज के छ? News"
+              alt="Live News"
               className="news-photo"
             />
 
-            <div className="news-photo-overlay">
-
-              <div className="photo-badge">
-                <span />
-                TODAY
-              </div>
-
-              <div className="photo-caption">
-                आजका मुख्य समाचार
-              </div>
-
-            </div>
-
           </div>
+
+          {/* ==================================================
+              NEWS CONTENT
+              ================================================== */}
 
           <div className="news-content">
 
@@ -1185,15 +1181,8 @@ export default function Home() {
             ) : bulletin ? (
               <>
 
+                {/* TIME ONLY */}
                 <div className="news-meta">
-
-                  <span>
-                    आज के छ?
-                  </span>
-
-                  <span>
-                    •
-                  </span>
 
                   <span>
                     {formatPublishedTime(
@@ -1203,19 +1192,19 @@ export default function Home() {
 
                 </div>
 
+                {/* HEADLINE */}
                 <h1 className="news-headline">
                   {shortTitle(
                     bulletin.title
                   )}
                 </h1>
 
+                {/* SUMMARY */}
                 {bulletin.summary && (
                   <p className="news-summary">
                     {bulletin.summary}
                   </p>
                 )}
-
-                <div className="news-bottom-space" />
 
               </>
             ) : (
@@ -1229,6 +1218,10 @@ export default function Home() {
             )}
 
           </div>
+
+          {/* ==================================================
+              RIGHT ACTIONS
+              ================================================== */}
 
           <aside className="right-actions">
 
@@ -1293,14 +1286,21 @@ export default function Home() {
 
           </aside>
 
-          {/* AUDIO DOCK */}
+          {/* ==================================================
+              MAIN AUDIO BULLETIN
+              ================================================== */}
+
           {selectedAudio?.audio_url && (
             <div className="audio-dock">
 
               <div className="audio-top">
 
                 <button
-                  className="play-button"
+                  className={`play-button ${
+                    audioPlaying
+                      ? "playing"
+                      : ""
+                  }`}
                   onClick={
                     toggleAudio
                   }
@@ -1318,21 +1318,26 @@ export default function Home() {
                 <div className="audio-info">
 
                   <div className="audio-title">
-
-                    {selectedAudio.id ===
-                    bulletin?.id
-                      ? "आजको Audio Bulletin"
-                      : "Previous Audio Bulletin"}
-
+                    आजका{" "}
+                    {selectedAudio.story_count ||
+                      12}{" "}
+                    प्रमुख समाचार
                   </div>
 
                   <div className="audio-subtitle">
-                    AI द्वारा तयार गरिएको
+                    AI Audio Bulletin
                   </div>
 
                 </div>
 
-                <div className="wave">
+                {/* ANIMATED WAVE */}
+                <div
+                  className={`wave ${
+                    audioPlaying
+                      ? "wave-active"
+                      : ""
+                  }`}
+                >
 
                   {Array.from({
                     length: 38,
@@ -1362,6 +1367,7 @@ export default function Home() {
 
               </div>
 
+              {/* PROGRESS */}
               <div className="audio-progress-row">
 
                 <span>
@@ -1403,10 +1409,28 @@ export default function Home() {
 
               </div>
 
+              {/* SMALL INFO */}
+              <div className="audio-bottom-info">
+
+                <span>
+                  ● हरेक घण्टा नयाँ bulletin
+                </span>
+
+                <span>
+                  {formatPublishedTime(
+                    selectedAudio.published_at
+                  )}
+                </span>
+
+              </div>
+
             </div>
           )}
 
-          {/* PREVIOUS BULLETINS */}
+          {/* ==================================================
+              PREVIOUS BULLETINS
+              ================================================== */}
+
           {history.length > 1 && (
             <div className="previous-bulletins">
 
@@ -1499,13 +1523,9 @@ export default function Home() {
             </div>
           )}
 
-          <div className="next-update">
-
-            <span className="update-dot" />
-
-            हरेक घण्टा नयाँ bulletin
-
-          </div>
+          {/* ==================================================
+              BOTTOM NAV
+              ================================================== */}
 
           <nav className="bottom-nav">
 
@@ -1515,6 +1535,7 @@ export default function Home() {
                 setPanel("home")
               }
             >
+
               <span>⌂</span>
 
               <small>
@@ -1529,6 +1550,7 @@ export default function Home() {
                 setPanel("search")
               }
             >
+
               <span>⌕</span>
 
               <small>
@@ -1543,9 +1565,11 @@ export default function Home() {
                 setPanel("chat")
               }
             >
+
               <span>
                 AI
               </span>
+
             </button>
 
             <button
@@ -1554,6 +1578,7 @@ export default function Home() {
                 setPanel("alerts")
               }
             >
+
               <span>♢</span>
 
               <small>
@@ -1568,6 +1593,7 @@ export default function Home() {
                 setPanel("profile")
               }
             >
+
               <span>◯</span>
 
               <small>
@@ -1581,7 +1607,10 @@ export default function Home() {
         </section>
       )}
 
-      {/* SEARCH */}
+      {/* ==================================================
+          SEARCH
+          ================================================== */}
+
       {panel === "search" && (
         <section className="full-panel">
 
@@ -1714,7 +1743,10 @@ export default function Home() {
         </section>
       )}
 
-      {/* CHAT */}
+      {/* ==================================================
+          CHAT
+          ================================================== */}
+
       {panel === "chat" && (
         <section className="chat-screen">
 
@@ -1895,7 +1927,10 @@ export default function Home() {
         </section>
       )}
 
-      {/* ALERTS */}
+      {/* ==================================================
+          ALERTS
+          ================================================== */}
+
       {panel === "alerts" && (
         <section className="full-panel">
 
@@ -1999,7 +2034,10 @@ export default function Home() {
         </section>
       )}
 
-      {/* PROFILE */}
+      {/* ==================================================
+          PROFILE
+          ================================================== */}
+
       {panel === "profile" && (
         <section className="full-panel">
 
@@ -2099,7 +2137,10 @@ export default function Home() {
         </section>
       )}
 
-      {/* COMMENTS */}
+      {/* ==================================================
+          COMMENTS
+          ================================================== */}
+
       {showComments && (
         <div className="overlay">
 

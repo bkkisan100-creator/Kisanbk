@@ -1,0 +1,28 @@
+name: Evening News Bulletin
+
+on:
+  schedule:
+    - cron: "15 12 * * *"
+    - cron: "15 13 * * *"
+    - cron: "15 14 * * *"
+    - cron: "15 15 * * *"
+    - cron: "15 16 * * *"
+  workflow_dispatch:
+
+jobs:
+  hourly-news:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate Aaja Ke Chha News
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          echo "Starting Aaja Ke Chha news pipeline..."
+
+          curl --fail-with-body -sS \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "https://kisanbk-7ywr.vercel.app/api/cron/hourly-news"
+
+          echo ""
+          echo "News bulletin completed successfully."
