@@ -1,28 +1,16 @@
 "use client";
 
-import {
-  FormEvent,
-  useState,
-} from "react";
-
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
-
 import { createClient } from "../lib/supabase/client";
 
 export default function ForgotPasswordPage() {
   const supabase = createClient();
 
-  const [email, setEmail] =
-    useState("");
-
-  const [loading, setLoading] =
-    useState(false);
-
-  const [error, setError] =
-    useState("");
-
-  const [success, setSuccess] =
-    useState("");
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   async function handleSubmit(
     event: FormEvent<HTMLFormElement>
@@ -32,25 +20,19 @@ export default function ForgotPasswordPage() {
     setError("");
     setSuccess("");
 
-    const cleanEmail =
-      email.trim().toLowerCase();
+    const cleanEmail = email.trim().toLowerCase();
 
     if (!cleanEmail) {
-      setError(
-        "Email राख्नुहोस्।"
-      );
+      setError("कृपया आफ्नो email राख्नुहोस्।");
       return;
     }
 
     setLoading(true);
 
     try {
-      const origin =
-        window.location.origin;
+      const origin = window.location.origin;
 
-      const {
-        error: resetError,
-      } =
+      const { error: resetError } =
         await supabase.auth.resetPasswordForEmail(
           cleanEmail,
           {
@@ -60,22 +42,21 @@ export default function ForgotPasswordPage() {
         );
 
       if (resetError) {
-        setError(
-          resetError.message
-        );
+        setError(resetError.message);
         return;
       }
 
-      /*
-       * Don't reveal whether an email
-       * exists in the system.
-       */
       setSuccess(
-        "यदि यो email account सँग जोडिएको छ भने password reset link पठाइएको छ। आफ्नो inbox जाँच गर्नुहोस्।"
+        "यदि यो email सँग account जोडिएको छ भने password reset link पठाइएको छ। आफ्नो inbox जाँच गर्नुहोस्।"
       );
-    } catch {
+    } catch (error) {
+      console.error(
+        "Forgot password error:",
+        error
+      );
+
       setError(
-        "Request पठाउँदा समस्या आयो।"
+        "Reset link पठाउँदा समस्या आयो। फेरि प्रयास गर्नुहोस्।"
       );
     } finally {
       setLoading(false);
@@ -92,39 +73,49 @@ export default function ForgotPasswordPage() {
           />
         </div>
 
-        <h1>Forgot password?</h1>
+        <div className="auth-heading">
+          <h1>Forgot Password?</h1>
 
-        <p className="auth-subtitle">
-          आफ्नो account को email राख्नुहोस्।
-        </p>
+          <p>
+            आफ्नो account को email राख्नुहोस्। हामी password reset link पठाउँछौँ।
+          </p>
+        </div>
 
         {error && (
           <div className="auth-alert error">
-            {error}
+            <span>!</span>
+            <p>{error}</p>
           </div>
         )}
 
         {success && (
           <div className="auth-alert success">
-            {success}
+            <span>✓</span>
+            <p>{success}</p>
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
-          <label>
-            Email
-          </label>
+        <form
+          onSubmit={handleSubmit}
+          className="auth-form"
+        >
+          <div className="auth-field">
+            <label htmlFor="forgot-email">
+              Email
+            </label>
 
-          <input
-            type="email"
-            value={email}
-            onChange={(e) =>
-              setEmail(e.target.value)
-            }
-            placeholder="you@example.com"
-            autoComplete="email"
-            disabled={loading}
-          />
+            <input
+              id="forgot-email"
+              type="email"
+              value={email}
+              onChange={(event) =>
+                setEmail(event.target.value)
+              }
+              placeholder="you@example.com"
+              autoComplete="email"
+              disabled={loading}
+            />
+          </div>
 
           <button
             type="submit"
@@ -137,11 +128,11 @@ export default function ForgotPasswordPage() {
           </button>
         </form>
 
-        <p className="auth-bottom">
+        <div className="auth-bottom auth-back">
           <Link href="/login">
-            ← Back to login
+            ← Back to Login
           </Link>
-        </p>
+        </div>
       </div>
     </main>
   );

@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { createClient } from "./lib/supabase/client";
+import {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 type Bulletin = {
   id: number;
@@ -28,7 +33,10 @@ type Panel =
   | "alerts"
   | "profile";
 
-const CHAT_STORAGE_KEY = "aaja-ke-chha-ai-chat-history";
+type AuthMode = "login" | "signup";
+
+const CHAT_STORAGE_KEY =
+  "aaja-ke-chha-ai-chat-history";
 
 const BACKGROUND_MUSIC =
   "https://ieuytrerprgrfqenxwsi.supabase.co/storage/v1/object/public/audio/background-music.wav";
@@ -59,7 +67,9 @@ function formatTime(seconds: number) {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
 
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
+  return `${mins}:${secs
+    .toString()
+    .padStart(2, "0")}`;
 }
 
 function formatPublishedTime(value?: string) {
@@ -94,7 +104,59 @@ function getBulletinTime(value?: string) {
 }
 
 export default function Home() {
-  const [showSplash, setShowSplash] = useState(true);
+  /*
+   * ==================================================
+   * SUPABASE CLIENT
+   * ==================================================
+   */
+
+  const [supabase] = useState(() =>
+    createClient()
+  );
+
+  /*
+   * ==================================================
+   * AUTH STATE
+   * ==================================================
+   */
+
+  const [user, setUser] = useState<any>(null);
+
+  const [profileName, setProfileName] =
+    useState("");
+
+  const [authMode, setAuthMode] =
+    useState<AuthMode>("login");
+
+  const [showAuth, setShowAuth] =
+    useState(false);
+
+  const [authEmail, setAuthEmail] =
+    useState("");
+
+  const [authPassword, setAuthPassword] =
+    useState("");
+
+  const [authName, setAuthName] =
+    useState("");
+
+  const [authLoading, setAuthLoading] =
+    useState(false);
+
+  const [authError, setAuthError] =
+    useState("");
+
+  const [authSuccess, setAuthSuccess] =
+    useState("");
+
+  /*
+   * ==================================================
+   * GENERAL STATE
+   * ==================================================
+   */
+
+  const [showSplash, setShowSplash] =
+    useState(true);
 
   const [bulletin, setBulletin] =
     useState<Bulletin | null>(null);
@@ -167,13 +229,447 @@ export default function Home() {
 
   /*
    * ==================================================
+   * AUTH - LOAD CURRENT SESSION
+   * ==================================================
+   */
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadCurrentUser() {
+      const {
+        data,
+        error,
+      } = await supabase.auth.getSession();
+
+      if (error) {
+        console.error(
+          "Session loading error:",
+          error
+        );
+        return;
+      }
+
+      if (!mounted) return;
+
+      const currentUser =
+        data.session?.user || null;
+
+      setUser(currentUser);
+
+      if (currentUser) {
+        await loadProfile(
+          currentUser.id
+        );
+      }
+    }
+
+    loadCurrentUser();
+
+    const {
+      data: authListener,
+    } =
+      supabase.auth.onAuthStateChange(
+        async (
+          _event,
+          session
+        ) => {
+          if (!mounted) return;
+
+          const currentUser =
+            session?.user || null;
+
+          setUser(currentUser);
+
+          if (currentUser) {
+            await loadProfile(
+              currentUser.id
+            );
+          } else {
+            setProfileName("");
+          }
+        }
+      );
+
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, [supabase]);
+
+  /*
+   * ==================================================
+   * LOAD PROFILE
+   * ==================================================
+   */
+
+  async function loadProfile(
+    userId: string
+  ) {
+    try {
+      const {
+        data,
+        error,
+      } = await supabase
+        .from("profiles")
+        .select(
+          "id, email, full_name"
+        )
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (error) {
+        console.error(
+          "Profile loading error:",
+          error
+        );
+        return;
+      }
+
+      if (data?.full_name) {
+        setProfileName(
+          data.full_name
+        );
+      } else if (user?.email) {
+        setProfileName(
+          user.email.split("@")[0]
+        );
+      }
+    } catch (error) {
+      console.error(
+        "Profile error:",
+        error
+      );
+    }
+  }
+
+  /*
+   * ==================================================
+   * OPEN LOGIN
+   * ==================================================
+   */
+
+  function openLogin() {
+    setAuthMode("login");
+
+    setAuthEmail("");
+    setAuthPassword("");
+    setAuthName("");
+
+    setAuthError("");
+    setAuthSuccess("");
+
+    setShowAuth(true);
+  }
+
+  /*
+   * ==================================================
+   * OPEN SIGNUP
+   * ==================================================
+   */
+
+  function openSignup() {
+    setAuthMode("signup");
+
+    setAuthEmail("");
+    setAuthPassword("");
+    setAuthName("");
+
+    setAuthError("");
+    setAuthSuccess("");
+
+    setShowAuth(true);
+  }
+
+  /*
+   * ==================================================
+   * CLOSE AUTH
+   * ==================================================
+   */
+
+  function closeAuth() {
+    if (authLoading) return;
+
+    setShowAuth(false);
+
+    setAuthError("");
+    setAuthSuccess("");
+  }
+
+  /*
+   * ==================================================
+   * LOGIN
+   * ==================================================
+   */
+
+  async function handleLogin() {
+    const email =
+      authEmail.trim();
+
+    const password =
+      authPassword;
+
+    setAuthError("");
+    setAuthSuccess("");
+
+    if (!email) {
+      setAuthError(
+        "Email राख्नुहोस्।"
+      );
+      return;
+    }
+
+    if (!password) {
+      setAuthError(
+        "Password राख्नुहोस्।"
+      );
+      return;
+    }
+
+    try {
+      setAuthLoading(true);
+
+      const {
+        data,
+        error,
+      } =
+        await supabase.auth.signInWithPassword(
+          {
+            email,
+            password,
+          }
+        );
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data.user) {
+        throw new Error(
+          "Login हुन सकेन। फेरि प्रयास गर्नुहोस्।"
+        );
+      }
+
+      setUser(data.user);
+
+      await loadProfile(
+        data.user.id
+      );
+
+      setAuthSuccess(
+        "Login सफल भयो।"
+      );
+
+      setAuthPassword("");
+
+      setTimeout(() => {
+        setShowAuth(false);
+        setAuthSuccess("");
+      }, 700);
+    } catch (error: any) {
+      console.error(
+        "Login error:",
+        error
+      );
+
+      setAuthError(
+        error?.message ||
+          "Login हुन सकेन। Email र password जाँच गर्नुहोस्।"
+      );
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  /*
+   * ==================================================
+   * CREATE ACCOUNT
+   * ==================================================
+   */
+
+  async function handleSignup() {
+    const name =
+      authName.trim();
+
+    const email =
+      authEmail.trim();
+
+    const password =
+      authPassword;
+
+    setAuthError("");
+    setAuthSuccess("");
+
+    if (!name) {
+      setAuthError(
+        "तपाईंको नाम राख्नुहोस्।"
+      );
+      return;
+    }
+
+    if (!email) {
+      setAuthError(
+        "Email राख्नुहोस्।"
+      );
+      return;
+    }
+
+    if (password.length < 6) {
+      setAuthError(
+        "Password कम्तीमा 6 characters हुनुपर्छ।"
+      );
+      return;
+    }
+
+    try {
+      setAuthLoading(true);
+
+      const {
+        data,
+        error,
+      } =
+        await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: name,
+            },
+          },
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data.user) {
+        throw new Error(
+          "Account create हुन सकेन।"
+        );
+      }
+
+      /*
+       * PROFILE TABLE
+       */
+
+      if (data.session) {
+        const {
+          error: profileError,
+        } = await supabase
+          .from("profiles")
+          .upsert({
+            id: data.user.id,
+            email: email,
+            full_name: name,
+          });
+
+        if (profileError) {
+          console.error(
+            "Profile save error:",
+            profileError
+          );
+        }
+
+        setUser(data.user);
+        setProfileName(name);
+
+        setAuthSuccess(
+          "Account सफलतापूर्वक बन्यो।"
+        );
+
+        setAuthPassword("");
+
+        setTimeout(() => {
+          setShowAuth(false);
+          setAuthSuccess("");
+        }, 900);
+      } else {
+        /*
+         * EMAIL CONFIRMATION ENABLED भएमा
+         */
+
+        setAuthSuccess(
+          "Account बन्यो। Email मा आएको confirmation link खोल्नुहोस्, त्यसपछि Login गर्नुहोस्।"
+        );
+
+        setAuthPassword("");
+      }
+    } catch (error: any) {
+      console.error(
+        "Signup error:",
+        error
+      );
+
+      setAuthError(
+        error?.message ||
+          "Account create हुन सकेन। फेरि प्रयास गर्नुहोस्।"
+      );
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  /*
+   * ==================================================
+   * AUTH FORM SUBMIT
+   * ==================================================
+   */
+
+  async function handleAuthSubmit(
+    event: React.FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    if (authMode === "login") {
+      await handleLogin();
+    } else {
+      await handleSignup();
+    }
+  }
+
+  /*
+   * ==================================================
+   * LOGOUT
+   * ==================================================
+   */
+
+  async function handleLogout() {
+    try {
+      const {
+        error,
+      } =
+        await supabase.auth.signOut();
+
+      if (error) {
+        throw error;
+      }
+
+      setUser(null);
+      setProfileName("");
+
+      setPanel("profile");
+    } catch (error) {
+      console.error(
+        "Logout error:",
+        error
+      );
+
+      alert(
+        "Logout हुन सकेन। फेरि प्रयास गर्नुहोस्।"
+      );
+    }
+  }
+
+  /*
+   * ==================================================
    * MUSIC VOLUME
    * ==================================================
    */
 
   useEffect(() => {
     if (musicRef.current) {
-      musicRef.current.volume = 0.007;
+      musicRef.current.volume =
+        0.007;
     }
   }, []);
 
@@ -184,11 +680,13 @@ export default function Home() {
    */
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowSplash(false);
-    }, 1800);
+    const timer =
+      setTimeout(() => {
+        setShowSplash(false);
+      }, 1800);
 
-    return () => clearTimeout(timer);
+    return () =>
+      clearTimeout(timer);
   }, []);
 
   /*
@@ -211,12 +709,14 @@ export default function Home() {
   useEffect(() => {
     if (showSplash) return;
 
-    const timer = setInterval(() => {
-      loadBulletin(true);
-      loadHistory(true);
-    }, 60000);
+    const timer =
+      setInterval(() => {
+        loadBulletin(true);
+        loadHistory(true);
+      }, 60000);
 
-    return () => clearInterval(timer);
+    return () =>
+      clearInterval(timer);
   }, [showSplash]);
 
   /*
@@ -225,22 +725,29 @@ export default function Home() {
    * ==================================================
    */
 
-  async function loadBulletin(silent = false) {
+  async function loadBulletin(
+    silent = false
+  ) {
     try {
       if (!silent) {
         setLoadingBulletin(true);
       }
 
-      const response = await fetch(
-        "/api/news/bulletin/latest",
-        {
-          cache: "no-store",
-        }
-      );
+      const response =
+        await fetch(
+          "/api/news/bulletin/latest",
+          {
+            cache: "no-store",
+          }
+        );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
-      if (data?.success && data?.bulletin) {
+      if (
+        data?.success &&
+        data?.bulletin
+      ) {
         const latest =
           data.bulletin as Bulletin;
 
@@ -250,17 +757,22 @@ export default function Home() {
           latest.like_count || 0
         );
 
-        setSelectedAudio((previous) => {
-          if (!previous) {
-            return latest;
-          }
+        setSelectedAudio(
+          (previous) => {
+            if (!previous) {
+              return latest;
+            }
 
-          if (previous.id === latest.id) {
-            return latest;
-          }
+            if (
+              previous.id ===
+              latest.id
+            ) {
+              return latest;
+            }
 
-          return previous;
-        });
+            return previous;
+          }
+        );
       }
     } catch (error) {
       console.error(
@@ -280,26 +792,34 @@ export default function Home() {
    * ==================================================
    */
 
-  async function loadHistory(silent = false) {
+  async function loadHistory(
+    silent = false
+  ) {
     try {
       if (!silent) {
         setLoadingHistory(true);
       }
 
-      const response = await fetch(
-        "/api/news/bulletin/history",
-        {
-          cache: "no-store",
-        }
-      );
+      const response =
+        await fetch(
+          "/api/news/bulletin/history",
+          {
+            cache: "no-store",
+          }
+        );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       if (
         data?.success &&
-        Array.isArray(data?.bulletins)
+        Array.isArray(
+          data?.bulletins
+        )
       ) {
-        setHistory(data.bulletins);
+        setHistory(
+          data.bulletins
+        );
       }
     } catch (error) {
       console.error(
@@ -401,7 +921,8 @@ export default function Home() {
     }
 
     if (
-      selectedAudio?.id === item.id
+      selectedAudio?.id ===
+      item.id
     ) {
       if (audio.paused) {
         try {
@@ -442,60 +963,67 @@ export default function Home() {
     setAudioCurrent(0);
     setAudioDuration(0);
 
-    setTimeout(async () => {
-      const currentAudio =
-        audioRef.current;
+    setTimeout(
+      async () => {
+        const currentAudio =
+          audioRef.current;
 
-      if (!currentAudio) return;
+        if (!currentAudio) return;
 
-      try {
-        currentAudio.pause();
-        currentAudio.currentTime = 0;
+        try {
+          currentAudio.pause();
+          currentAudio.currentTime = 0;
 
-        currentAudio.load();
+          currentAudio.load();
 
-        await new Promise<void>(
-          (resolve) => {
-            const handler = () => {
-              currentAudio.removeEventListener(
+          await new Promise<void>(
+            (resolve) => {
+              const handler =
+                () => {
+                  currentAudio.removeEventListener(
+                    "canplay",
+                    handler
+                  );
+
+                  resolve();
+                };
+
+              currentAudio.addEventListener(
                 "canplay",
                 handler
               );
 
-              resolve();
-            };
+              setTimeout(
+                () => {
+                  currentAudio.removeEventListener(
+                    "canplay",
+                    handler
+                  );
 
-            currentAudio.addEventListener(
-              "canplay",
-              handler
-            );
-
-            setTimeout(() => {
-              currentAudio.removeEventListener(
-                "canplay",
-                handler
+                  resolve();
+                },
+                1000
               );
+            }
+          );
 
-              resolve();
-            }, 1000);
-          }
-        );
+          await currentAudio.play();
 
-        await currentAudio.play();
+          setAudioPlaying(true);
 
-        setAudioPlaying(true);
+          await startBackgroundMusic();
+        } catch (error) {
+          console.error(
+            "Selected audio play error:",
+            error
+          );
 
-        await startBackgroundMusic();
-      } catch (error) {
-        console.error(
-          "Selected audio play error:",
-          error
-        );
-
-        setAudioPlaying(false);
-        pauseBackgroundMusic();
-      }
-    }, 80);
+          setAudioPlaying(false);
+          pauseBackgroundMusic();
+        }
+      },
+      80
+    );
   }
 
   /*
@@ -509,7 +1037,9 @@ export default function Home() {
       return;
     }
 
-    await playBulletin(bulletin);
+    await playBulletin(
+      bulletin
+    );
   }
 
   /*
@@ -522,7 +1052,10 @@ export default function Home() {
     const audio =
       audioRef.current;
 
-    if (!audio || !selectedAudio) {
+    if (
+      !audio ||
+      !selectedAudio
+    ) {
       return;
     }
 
@@ -655,7 +1188,10 @@ export default function Home() {
           JSON.parse(saved);
 
         if (Array.isArray(parsed)) {
-          setChatMessages(parsed);
+          setChatMessages(
+            parsed
+          );
+
           return;
         }
       }
@@ -692,12 +1228,15 @@ export default function Home() {
    */
 
   useEffect(() => {
-    if (!chatMessages.length) return;
+    if (!chatMessages.length)
+      return;
 
     try {
       localStorage.setItem(
         CHAT_STORAGE_KEY,
-        JSON.stringify(chatMessages)
+        JSON.stringify(
+          chatMessages
+        )
       );
     } catch (error) {
       console.error(
@@ -714,16 +1253,21 @@ export default function Home() {
    */
 
   useEffect(() => {
-    if (panel !== "chat") return;
+    if (panel !== "chat")
+      return;
 
-    const timer = setTimeout(() => {
-      chatEndRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "end",
-      });
-    }, 50);
+    const timer =
+      setTimeout(() => {
+        chatEndRef.current?.scrollIntoView(
+          {
+            behavior: "smooth",
+            block: "end",
+          }
+        );
+      }, 50);
 
-    return () => clearTimeout(timer);
+    return () =>
+      clearTimeout(timer);
   }, [
     chatMessages,
     chatLoading,
@@ -737,7 +1281,8 @@ export default function Home() {
    */
 
   function startNewChat() {
-    const firstMessage: ChatMessage = {
+    const firstMessage:
+      ChatMessage = {
       id: makeId(),
       role: "assistant",
       text:
@@ -773,11 +1318,15 @@ export default function Home() {
     const message =
       chatInput.trim();
 
-    if (!message || chatLoading) {
+    if (
+      !message ||
+      chatLoading
+    ) {
       return;
     }
 
-    const userMessage: ChatMessage = {
+    const userMessage:
+      ChatMessage = {
       id: makeId(),
       role: "user",
       text: message,
@@ -907,7 +1456,8 @@ export default function Home() {
   async function toggleLike() {
     if (!bulletin) return;
 
-    const nextLiked = !liked;
+    const nextLiked =
+      !liked;
 
     setLiked(nextLiked);
 
@@ -978,7 +1528,9 @@ export default function Home() {
           `${title}\n${window.location.href}`
         );
 
-        alert("Link copied!");
+        alert(
+          "Link copied!"
+        );
       }
     } catch (error) {
       console.error(
@@ -1088,7 +1640,9 @@ export default function Home() {
       {selectedAudio?.audio_url && (
         <audio
           ref={audioRef}
-          src={selectedAudio.audio_url}
+          src={
+            selectedAudio.audio_url
+          }
           preload="metadata"
           onTimeUpdate={
             handleAudioTimeUpdate
@@ -1117,7 +1671,6 @@ export default function Home() {
       {panel === "home" && (
         <section className="home-screen">
 
-          {/* BACKGROUND */}
           <div className="news-background">
             <div className="background-glow glow-one" />
             <div className="background-glow glow-two" />
@@ -1148,10 +1701,7 @@ export default function Home() {
             LIVE NEWS
           </div>
 
-          {/* ==================================================
-              LARGE NEWS PHOTO
-              ================================================== */}
-
+          {/* NEWS PHOTO */}
           <div className="news-photo-card">
 
             <img
@@ -1162,10 +1712,7 @@ export default function Home() {
 
           </div>
 
-          {/* ==================================================
-              NEWS CONTENT
-              ================================================== */}
-
+          {/* NEWS CONTENT */}
           <div className="news-content">
 
             {loadingBulletin ? (
@@ -1181,7 +1728,6 @@ export default function Home() {
             ) : bulletin ? (
               <>
 
-                {/* TIME ONLY */}
                 <div className="news-meta">
 
                   <span>
@@ -1192,17 +1738,17 @@ export default function Home() {
 
                 </div>
 
-                {/* HEADLINE */}
                 <h1 className="news-headline">
                   {shortTitle(
                     bulletin.title
                   )}
                 </h1>
 
-                {/* SUMMARY */}
                 {bulletin.summary && (
                   <p className="news-summary">
-                    {bulletin.summary}
+                    {
+                      bulletin.summary
+                    }
                   </p>
                 )}
 
@@ -1219,10 +1765,7 @@ export default function Home() {
 
           </div>
 
-          {/* ==================================================
-              RIGHT ACTIONS
-              ================================================== */}
-
+          {/* RIGHT ACTIONS */}
           <aside className="right-actions">
 
             <button
@@ -1286,10 +1829,7 @@ export default function Home() {
 
           </aside>
 
-          {/* ==================================================
-              MAIN AUDIO BULLETIN
-              ================================================== */}
-
+          {/* AUDIO BULLETIN */}
           {selectedAudio?.audio_url && (
             <div className="audio-dock">
 
@@ -1330,7 +1870,6 @@ export default function Home() {
 
                 </div>
 
-                {/* ANIMATED WAVE */}
                 <div
                   className={`wave ${
                     audioPlaying
@@ -1409,7 +1948,6 @@ export default function Home() {
 
               </div>
 
-              {/* SMALL INFO */}
               <div className="audio-bottom-info">
 
                 <span>
@@ -1427,10 +1965,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* ==================================================
-              PREVIOUS BULLETINS
-              ================================================== */}
-
+          {/* PREVIOUS BULLETINS */}
           {history.length > 1 && (
             <div className="previous-bulletins">
 
@@ -1523,10 +2058,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* ==================================================
-              BOTTOM NAV
-              ================================================== */}
-
+          {/* BOTTOM NAV */}
           <nav className="bottom-nav">
 
             <button
@@ -1706,7 +2238,9 @@ export default function Home() {
 
                   {item.summary && (
                     <p>
-                      {item.summary}
+                      {
+                        item.summary
+                      }
                     </p>
                   )}
 
@@ -2063,50 +2597,125 @@ export default function Home() {
           <div className="profile-content">
 
             <div className="profile-avatar">
-              आ
+              {user
+                ? (
+                    profileName ||
+                    user.email ||
+                    "आ"
+                  )
+                    .charAt(0)
+                    .toUpperCase()
+                : "आ"}
             </div>
 
             <h2>
-              आज के छ?
+              {user
+                ? profileName ||
+                  "आज के छ? User"
+                : "आज के छ?"}
             </h2>
 
             <p>
-              AI-powered Nepali News
+              {user
+                ? user.email
+                : "AI-powered Nepali News"}
             </p>
 
-            <div className="profile-card">
+            {/* =========================================
+                LOGGED IN
+                ========================================= */}
 
-              <div>
-                <span>
-                  Language
-                </span>
+            {user ? (
+              <>
 
-                <strong>
-                  नेपाली
-                </strong>
+                <div className="profile-card">
+
+                  <div>
+                    <span>
+                      Account
+                    </span>
+
+                    <strong>
+                      Logged in
+                    </strong>
+                  </div>
+
+                  <div>
+                    <span>
+                      Language
+                    </span>
+
+                    <strong>
+                      नेपाली
+                    </strong>
+                  </div>
+
+                  <div>
+                    <span>
+                      AI Assistant
+                    </span>
+
+                    <strong>
+                      Gemini AI
+                    </strong>
+                  </div>
+
+                  <div>
+                    <span>
+                      News
+                    </span>
+
+                    <strong>
+                      AI Audio Bulletin
+                    </strong>
+                  </div>
+
+                </div>
+
+                <button
+                  className="profile-auth-button logout-button"
+                  onClick={
+                    handleLogout
+                  }
+                >
+                  🚪 Logout
+                </button>
+
+              </>
+            ) : (
+              /* =========================================
+                 LOGGED OUT
+                 ========================================= */
+
+              <div className="profile-auth-box">
+
+                <p className="profile-login-text">
+                  Account बनाएर आफ्नो profile सुरक्षित राख्नुहोस्।
+                </p>
+
+                <button
+                  className="profile-auth-button"
+                  onClick={
+                    openSignup
+                  }
+                >
+                  ✨ Create Account
+                </button>
+
+                <button
+                  className="profile-login-link"
+                  onClick={
+                    openLogin
+                  }
+                >
+                  पहिले नै account छ?{" "}
+                  <strong>
+                    Login
+                  </strong>
+                </button>
+
               </div>
-
-              <div>
-                <span>
-                  AI Assistant
-                </span>
-
-                <strong>
-                  Gemini AI
-                </strong>
-              </div>
-
-              <div>
-                <span>
-                  News
-                </span>
-
-                <strong>
-                  AI Audio Bulletin
-                </strong>
-              </div>
-
-            </div>
+            )}
 
           </div>
 
@@ -2236,6 +2845,254 @@ export default function Home() {
               >
                 ↑
               </button>
+
+            </div>
+
+          </div>
+
+        </div>
+      )}
+
+      {/* ==================================================
+          AUTH MODAL
+          ================================================== */}
+
+      {showAuth && (
+        <div className="overlay auth-overlay">
+
+          <div className="auth-sheet">
+
+            {/* AUTH HEADER */}
+
+            <div className="sheet-header">
+
+              <strong>
+                {authMode ===
+                "login"
+                  ? "Login"
+                  : "Create Account"}
+              </strong>
+
+              <button
+                onClick={
+                  closeAuth
+                }
+                disabled={
+                  authLoading
+                }
+              >
+                ×
+              </button>
+
+            </div>
+
+            {/* AUTH ICON */}
+
+            <div className="auth-icon">
+              {authMode ===
+              "login"
+                ? "🔐"
+                : "✨"}
+            </div>
+
+            <h2 className="auth-title">
+              {authMode ===
+              "login"
+                ? "फेरि स्वागत छ"
+                : "आज के छ? मा account बनाउनुहोस्"}
+            </h2>
+
+            <p className="auth-subtitle">
+              {authMode ===
+              "login"
+                ? "आफ्नो account मा login गर्नुहोस्।"
+                : "तपाईंको profile सुरक्षित राख्न account बनाउनुहोस्।"}
+            </p>
+
+            {/* AUTH FORM */}
+
+            <form
+              onSubmit={
+                handleAuthSubmit
+              }
+              className="auth-form"
+            >
+
+              {/* NAME */}
+
+              {authMode ===
+                "signup" && (
+                <div className="auth-field">
+
+                  <label>
+                    Name
+                  </label>
+
+                  <input
+                    type="text"
+                    value={
+                      authName
+                    }
+                    onChange={(
+                      event
+                    ) =>
+                      setAuthName(
+                        event.target
+                          .value
+                      )
+                    }
+                    placeholder="तपाईंको नाम"
+                    autoComplete="name"
+                    disabled={
+                      authLoading
+                    }
+                  />
+
+                </div>
+              )}
+
+              {/* EMAIL */}
+
+              <div className="auth-field">
+
+                <label>
+                  Email
+                </label>
+
+                <input
+                  type="email"
+                  value={
+                    authEmail
+                  }
+                  onChange={(
+                    event
+                  ) =>
+                    setAuthEmail(
+                      event.target
+                        .value
+                    )
+                  }
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  disabled={
+                    authLoading
+                  }
+                />
+
+              </div>
+
+              {/* PASSWORD */}
+
+              <div className="auth-field">
+
+                <label>
+                  Password
+                </label>
+
+                <input
+                  type="password"
+                  value={
+                    authPassword
+                  }
+                  onChange={(
+                    event
+                  ) =>
+                    setAuthPassword(
+                      event.target
+                        .value
+                    )
+                  }
+                  placeholder="कम्तीमा 6 characters"
+                  autoComplete={
+                    authMode ===
+                    "login"
+                      ? "current-password"
+                      : "new-password"
+                  }
+                  disabled={
+                    authLoading
+                  }
+                />
+
+              </div>
+
+              {/* ERROR */}
+
+              {authError && (
+                <div className="auth-error">
+                  {authError}
+                </div>
+              )}
+
+              {/* SUCCESS */}
+
+              {authSuccess && (
+                <div className="auth-success">
+                  {authSuccess}
+                </div>
+              )}
+
+              {/* SUBMIT */}
+
+              <button
+                type="submit"
+                className="auth-submit-button"
+                disabled={
+                  authLoading
+                }
+              >
+                {authLoading
+                  ? "Please wait..."
+                  : authMode ===
+                    "login"
+                  ? "🔐 Login"
+                  : "✨ Create Account"}
+              </button>
+
+            </form>
+
+            {/* SWITCH AUTH */}
+
+            <div className="auth-switch">
+
+              {authMode ===
+              "login" ? (
+                <>
+                  <span>
+                    Account छैन?
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={
+                      openSignup
+                    }
+                    disabled={
+                      authLoading
+                    }
+                  >
+                    Create Account
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span>
+                    पहिले नै account छ?
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={
+                      openLogin
+                    }
+                    disabled={
+                      authLoading
+                    }
+                  >
+                    Login
+                  </button>
+                </>
+              )}
 
             </div>
 

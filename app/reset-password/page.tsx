@@ -1,36 +1,31 @@
 "use client";
 
 import {
-  FormEvent,
   useEffect,
   useState,
+  type FormEvent,
 } from "react";
-
 import { useRouter } from "next/navigation";
-
 import { createClient } from "../lib/supabase/client";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
-
   const supabase = createClient();
 
-  const [password, setPassword] =
-    useState("");
-
+  const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] =
     useState("");
 
-  const [loading, setLoading] =
+  const [showPassword, setShowPassword] =
     useState(false);
 
   const [checking, setChecking] =
     useState(true);
 
-  const [ready, setReady] =
+  const [loading, setLoading] =
     useState(false);
 
-  const [showPassword, setShowPassword] =
+  const [ready, setReady] =
     useState(false);
 
   const [error, setError] =
@@ -42,33 +37,37 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     let active = true;
 
-    async function checkSession() {
+    async function checkResetSession() {
       try {
         const {
           data,
           error: sessionError,
         } = await supabase.auth.getSession();
 
-        if (!active) {
+        if (!active) return;
+
+        if (sessionError || !data.session) {
+          setReady(false);
+
+          setError(
+            "यो password reset link valid छैन वा expire भइसकेको छ।"
+          );
+
           return;
         }
 
-        if (
-          sessionError ||
-          !data.session
-        ) {
-          setError(
-            "Password reset session expired. फेरि Forgot Password बाट request गर्नुहोस्।"
-          );
+        setReady(true);
+      } catch (error) {
+        console.error(
+          "Reset session error:",
+          error
+        );
 
-          setReady(false);
-        } else {
-          setReady(true);
-        }
-      } catch {
         if (active) {
+          setReady(false);
+
           setError(
-            "Reset session verify गर्न सकिएन।"
+            "Reset session verify गर्न सकिएन। फेरि reset link request गर्नुहोस्।"
           );
         }
       } finally {
@@ -78,7 +77,7 @@ export default function ResetPasswordPage() {
       }
     }
 
-    checkSession();
+    checkResetSession();
 
     return () => {
       active = false;
@@ -95,7 +94,7 @@ export default function ResetPasswordPage() {
 
     if (!ready) {
       setError(
-        "Reset session valid छैन।"
+        "Password reset session valid छैन।"
       );
       return;
     }
@@ -124,24 +123,30 @@ export default function ResetPasswordPage() {
       });
 
       if (updateError) {
-        setError(
-          updateError.message
-        );
+        setError(updateError.message);
         return;
       }
 
       setSuccess(
-        "Password successfully change भयो। अब login गर्नुहोस्।"
+        "Password सफलतापूर्वक परिवर्तन भयो। अब Login गर्नुहोस्।"
       );
+
+      setPassword("");
+      setConfirmPassword("");
 
       await supabase.auth.signOut();
 
       setTimeout(() => {
         router.replace("/login");
-      }, 1500);
-    } catch {
+      }, 1800);
+    } catch (error) {
+      console.error(
+        "Password update error:",
+        error
+      );
+
       setError(
-        "Password update गर्दा समस्या आयो।"
+        "Password परिवर्तन गर्दा समस्या आयो। फेरि प्रयास गर्नुहोस्।"
       );
     } finally {
       setLoading(false);
@@ -151,7 +156,7 @@ export default function ResetPasswordPage() {
   if (checking) {
     return (
       <main className="auth-page">
-        <div className="auth-card">
+        <div className="auth-card auth-loading-card">
           <div className="auth-logo">
             <img
               src="/logo.png"
@@ -159,11 +164,13 @@ export default function ResetPasswordPage() {
             />
           </div>
 
-          <h1>Checking...</h1>
+          <div className="auth-heading">
+            <h1>Checking...</h1>
 
-          <p className="auth-subtitle">
-            Secure reset session verify हुँदैछ।
-          </p>
+            <p>
+              Password reset session जाँच हुँदैछ।
+            </p>
+          </div>
         </div>
       </main>
     );
@@ -179,83 +186,97 @@ export default function ResetPasswordPage() {
           />
         </div>
 
-        <h1>New password</h1>
+        <div className="auth-heading">
+          <h1>New Password</h1>
 
-        <p className="auth-subtitle">
-          आफ्नो नयाँ password राख्नुहोस्।
-        </p>
+          <p>
+            आफ्नो नयाँ password राख्नुहोस्।
+          </p>
+        </div>
 
         {error && (
           <div className="auth-alert error">
-            {error}
+            <span>!</span>
+            <p>{error}</p>
           </div>
         )}
 
         {success && (
           <div className="auth-alert success">
-            {success}
+            <span>✓</span>
+            <p>{success}</p>
           </div>
         )}
 
         {ready && !success && (
-          <form onSubmit={handleSubmit}>
-            <label>
-              New password
-            </label>
+          <form
+            onSubmit={handleSubmit}
+            className="auth-form"
+          >
+            <div className="auth-field">
+              <label htmlFor="new-password">
+                New Password
+              </label>
 
-            <div className="password-wrap">
+              <div className="auth-password-wrap">
+                <input
+                  id="new-password"
+                  type={
+                    showPassword
+                      ? "text"
+                      : "password"
+                  }
+                  value={password}
+                  onChange={(event) =>
+                    setPassword(
+                      event.target.value
+                    )
+                  }
+                  placeholder="At least 8 characters"
+                  autoComplete="new-password"
+                  disabled={loading}
+                />
+
+                <button
+                  type="button"
+                  className="auth-password-toggle"
+                  onClick={() =>
+                    setShowPassword(
+                      (value) => !value
+                    )
+                  }
+                  disabled={loading}
+                >
+                  {showPassword
+                    ? "Hide"
+                    : "Show"}
+                </button>
+              </div>
+            </div>
+
+            <div className="auth-field">
+              <label htmlFor="confirm-password">
+                Confirm Password
+              </label>
+
               <input
+                id="confirm-password"
                 type={
                   showPassword
                     ? "text"
                     : "password"
                 }
-                value={password}
-                onChange={(e) =>
-                  setPassword(
-                    e.target.value
+                value={confirmPassword}
+                onChange={(event) =>
+                  setConfirmPassword(
+                    event.target.value
                   )
                 }
-                placeholder="At least 8 characters"
+                placeholder="Repeat password"
                 autoComplete="new-password"
                 disabled={loading}
               />
-
-              <button
-                type="button"
-                className="password-toggle"
-                onClick={() =>
-                  setShowPassword(
-                    (value) => !value
-                  )
-                }
-              >
-                {showPassword
-                  ? "Hide"
-                  : "Show"}
-              </button>
             </div>
-
-            <label>
-              Confirm new password
-            </label>
-
-            <input
-              type={
-                showPassword
-                  ? "text"
-                  : "password"
-              }
-              value={confirmPassword}
-              onChange={(e) =>
-                setConfirmPassword(
-                  e.target.value
-                )
-              }
-              placeholder="Repeat password"
-              autoComplete="new-password"
-              disabled={loading}
-            />
 
             <button
               type="submit"

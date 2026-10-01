@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
@@ -15,7 +15,6 @@ export async function GET(request: Request) {
       ? next
       : "/";
 
-  // Expired / invalid Supabase link
   if (!code) {
     if (errorCode === "otp_expired") {
       return NextResponse.redirect(
@@ -45,21 +44,16 @@ export async function GET(request: Request) {
         getAll() {
           return cookieStore.getAll();
         },
-
         setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(
-              ({ name, value, options }) => {
-                cookieStore.set(
-                  name,
-                  value,
-                  options
-                );
-              }
-            );
-          } catch {
-            // Cookie handling may also be handled by proxy.
-          }
+          cookiesToSet.forEach(
+            ({ name, value, options }) => {
+              cookieStore.set(
+                name,
+                value,
+                options
+              );
+            }
+          );
         },
       },
     }

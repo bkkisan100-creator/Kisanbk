@@ -1,35 +1,28 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import {
+  useState,
+  type FormEvent,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "../lib/supabase/client";
 
 export default function SignupPage() {
   const router = useRouter();
-
   const supabase = createClient();
 
-  const [email, setEmail] =
-    useState("");
-
-  const [password, setPassword] =
-    useState("");
-
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] =
     useState("");
 
-  const [loading, setLoading] =
-    useState(false);
-
+  const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] =
     useState(false);
 
-  const [error, setError] =
-    useState("");
-
-  const [success, setSuccess] =
-    useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   async function handleSignup(
     event: FormEvent<HTMLFormElement>
@@ -39,11 +32,10 @@ export default function SignupPage() {
     setError("");
     setSuccess("");
 
-    const cleanEmail =
-      email.trim().toLowerCase();
+    const cleanEmail = email.trim().toLowerCase();
 
     if (!cleanEmail) {
-      setError("Email राख्नुहोस्।");
+      setError("कृपया आफ्नो email राख्नुहोस्।");
       return;
     }
 
@@ -64,8 +56,7 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
-      const origin =
-        window.location.origin;
+      const origin = window.location.origin;
 
       const {
         data,
@@ -80,35 +71,55 @@ export default function SignupPage() {
       });
 
       if (signupError) {
+        setError(signupError.message);
+        return;
+      }
+
+      if (!data.user) {
         setError(
-          signupError.message
+          "Account बनाउन सकिएन। फेरि प्रयास गर्नुहोस्।"
         );
         return;
       }
 
-      /*
-       * If email confirmation is enabled,
-       * Supabase normally returns a user
-       * without an active session.
-       */
-      if (
-        data.user &&
-        !data.session
-      ) {
+      if (!data.session) {
         setSuccess(
-          "Account तयार भयो। आफ्नो email खोल्नुहोस् र verification link क्लिक गर्नुहोस्।"
+          "Account तयार भयो। आफ्नो email खोल्नुहोस् र verification link क्लिक गर्नुहोस्। त्यसपछि Login गर्नुहोस्।"
         );
+
+        setPassword("");
+        setConfirmPassword("");
 
         return;
       }
 
-      if (data.session) {
-        router.replace("/");
-        router.refresh();
+      const fullName =
+        cleanEmail.split("@")[0];
+
+      const { error: profileError } =
+        await supabase.from("profiles").upsert({
+          id: data.user.id,
+          email: cleanEmail,
+          full_name: fullName,
+        });
+
+      if (profileError) {
+        console.error(
+          "Profile creation error:",
+          profileError
+        );
       }
-    } catch {
+
+      router.replace("/");
+      router.refresh();
+    } catch (error) {
+      console.error(
+        "Signup error:",
+        error
+      );
+
       setError(
-        "Account बनाउन समस्या आयो। फेरि प्रयास गर्नुहोस्।"
+        "Account बनाउँदा समस्या आयो। फेरि प्रयास गर्नुहोस्।"
       );
     } finally {
       setLoading(false);
@@ -125,95 +136,114 @@ export default function SignupPage() {
           />
         </div>
 
-        <h1>Create account</h1>
+        <div className="auth-heading">
+          <h1>Create Account</h1>
 
-        <p className="auth-subtitle">
-          आज के छ? मा आफ्नो account बनाउनुहोस्।
-        </p>
+          <p>
+            आज के छ? मा आफ्नो account बनाउनुहोस्।
+          </p>
+        </div>
 
         {error && (
           <div className="auth-alert error">
-            {error}
+            <span>!</span>
+            <p>{error}</p>
           </div>
         )}
 
         {success && (
           <div className="auth-alert success">
-            {success}
+            <span>✓</span>
+            <p>{success}</p>
           </div>
         )}
 
-        <form onSubmit={handleSignup}>
-          <label>
-            Email
-          </label>
+        <form
+          onSubmit={handleSignup}
+          className="auth-form"
+        >
+          <div className="auth-field">
+            <label htmlFor="signup-email">
+              Email
+            </label>
 
-          <input
-            type="email"
-            value={email}
-            onChange={(e) =>
-              setEmail(e.target.value)
-            }
-            placeholder="you@example.com"
-            autoComplete="email"
-            disabled={loading}
-          />
-
-          <label>
-            Password
-          </label>
-
-          <div className="password-wrap">
             <input
+              id="signup-email"
+              type="email"
+              value={email}
+              onChange={(event) =>
+                setEmail(event.target.value)
+              }
+              placeholder="you@example.com"
+              autoComplete="email"
+              disabled={loading}
+            />
+          </div>
+
+          <div className="auth-field">
+            <label htmlFor="signup-password">
+              Password
+            </label>
+
+            <div className="auth-password-wrap">
+              <input
+                id="signup-password"
+                type={
+                  showPassword
+                    ? "text"
+                    : "password"
+                }
+                value={password}
+                onChange={(event) =>
+                  setPassword(
+                    event.target.value
+                  )
+                }
+                placeholder="At least 8 characters"
+                autoComplete="new-password"
+                disabled={loading}
+              />
+
+              <button
+                type="button"
+                className="auth-password-toggle"
+                onClick={() =>
+                  setShowPassword(
+                    (value) => !value
+                  )
+                }
+                disabled={loading}
+              >
+                {showPassword
+                  ? "Hide"
+                  : "Show"}
+              </button>
+            </div>
+          </div>
+
+          <div className="auth-field">
+            <label htmlFor="signup-confirm">
+              Confirm Password
+            </label>
+
+            <input
+              id="signup-confirm"
               type={
                 showPassword
                   ? "text"
                   : "password"
               }
-              value={password}
-              onChange={(e) =>
-                setPassword(e.target.value)
+              value={confirmPassword}
+              onChange={(event) =>
+                setConfirmPassword(
+                  event.target.value
+                )
               }
-              placeholder="At least 8 characters"
+              placeholder="Repeat password"
               autoComplete="new-password"
               disabled={loading}
             />
-
-            <button
-              type="button"
-              className="password-toggle"
-              onClick={() =>
-                setShowPassword(
-                  (value) => !value
-                )
-              }
-            >
-              {showPassword
-                ? "Hide"
-                : "Show"}
-            </button>
           </div>
-
-          <label>
-            Confirm password
-          </label>
-
-          <input
-            type={
-              showPassword
-                ? "text"
-                : "password"
-            }
-            value={confirmPassword}
-            onChange={(e) =>
-              setConfirmPassword(
-                e.target.value
-              )
-            }
-            placeholder="Repeat password"
-            autoComplete="new-password"
-            disabled={loading}
-          />
 
           <button
             type="submit"
@@ -221,7 +251,7 @@ export default function SignupPage() {
             disabled={loading}
           >
             {loading
-              ? "Creating account..."
+              ? "Account बनाउँदै..."
               : "Create Account"}
           </button>
         </form>
@@ -230,13 +260,13 @@ export default function SignupPage() {
           <span>OR</span>
         </div>
 
-        <p className="auth-bottom">
-          पहिले नै account छ?
-          {" "}
+        <div className="auth-bottom">
+          <span>पहिले नै account छ?</span>
+
           <Link href="/login">
-            Sign in
+            Login
           </Link>
-        </p>
+        </div>
       </div>
     </main>
   );
