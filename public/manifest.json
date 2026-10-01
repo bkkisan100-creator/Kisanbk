@@ -1,0 +1,18 @@
+{
+  "name": "Aaja Ke Chha",
+  "short_name": "Aaja Ke Chha",
+  "description": "AI-powered Nepali News & Audio Bulletin",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090909",
+  "theme_color": "#ff3040",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
