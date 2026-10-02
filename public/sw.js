@@ -1,33 +1,36 @@
-const CACHE_NAME = "aaja-ke-chha-v1";
-
 self.addEventListener("install", () => {
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    self.clients.claim()
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys.map((key) => caches.delete(key))
+        )
+      )
+      .then(() => self.clients.claim())
   );
 });
 
 self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") {
-    return;
-  }
+  if (event.request.method !== "GET") return;
 
   const url = new URL(event.request.url);
 
-  if (url.origin !== self.location.origin) {
-    return;
-  }
+  if (url.origin !== self.location.origin) return;
 
-  // API/news requests लाई cache नगर्ने
+  // API/news requests should always go to the network
   if (url.pathname.startsWith("/api/")) {
     return;
   }
 
   event.respondWith(
-    fetch(event.request).catch(() =>
+    fetch(event.request, {
+      cache: "no-store",
+    }).catch(() =>
       caches.match(event.request)
     )
   );
